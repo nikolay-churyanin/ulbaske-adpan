@@ -474,3 +474,124 @@ class GitHubManager:
         except Exception as e:
             logger.error(f"Ошибка при сохранении локального изображения: {e}")
             return False
+
+    def _load_game_data(self, filename):
+        """Загрузить данные конкретной игры"""
+        try:
+            if not self.github_available:
+                file_path = os.path.join(GAMES_DIR_PATH, filename)
+                if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                return None
+            
+            file_path = f"{GAMES_DIR_PATH}/{filename}"
+            file_content = self.repo.get_contents(file_path)
+            content = base64.b64decode(file_content.content).decode('utf-8')
+            return json.loads(content)
+        except Exception as e:
+            logger.error(f"Ошибка при загрузке данных игры {filename}: {e}")
+            return None
+
+    def _load_game_data_by_number(self, game_number):
+        """Загрузить данные игры по номеру"""
+        filename = f"game_{game_number:03d}.json"
+        return self._load_game_data(filename)
+
+    def get_games_without_statistics_optimized(self, league=None):
+        """Оптимизированное получение игр без статистики"""
+        try:
+            if not self.github_available:
+                return self._get_local_games_without_stats_optimized(league)
+            
+            # Получаем файлы статистики одним запросом
+            stats_files = set()
+            try:
+                contents = self.repo.get_contents(RESULT_IMAGES_DIR)
+                for item in contents:
+                    if item.name.startswith("game_") and item.name.endswith((".jpg", ".jpeg", ".png")):
+                        game_number = self.extract_game_number(item.name)
+                        if game_number:
+                            stats_files.add(game_number)
+            except:
+                pass  # Папка может не существовать
+            
+            # Получаем все игры
+            all_games = []
+            try:
+                contents = self.repo.get_contents(GAMES_DIR_PATH)
+                for item in contents:
+                    if item.name.startswith("game_") and item.name.endswith(".json"):
+                        try:
+                            # Проверяем, есть ли статистика
+                            game_number = self.extract_game_number(item.name)
+                            if game_number and game_number not in stats_files:
+                                # Проверяем лигу если указана
+                                if league:
+                                    # Загружаем данные для проверки лиги
+                                    file_content = base64.b64decode(item.content).decode('utf-8')
+                                    game_data = json.loads(file_content)
+                                    game_league = self.get_game_league(game_data)
+                                    if game_league != league:
+                                        continue
+                                
+                                all_games.append({
+                                    'file_name': item.name,
+                                    'game_number': game_number,
+                                    'path': item.path
+                                })
+                        except:
+                            continue
+            except:
+                pass
+            
+            # Сортируем по номеру игры (по убыванию)
+            all_games.sort(key=lambda x: x['game_number'], reverse=True)
+            return all_games[:5]  # Возвращаем только 5 последних
+                
+        except Exception as e:
+            logger.error(f"Ошибка при получении игр без статистики (оптимизированно): {e}")
+            return []
+
+    def _get_local_games_without_stats_optimized(self, league=None):
+        """Локальная оптимизированная версия"""
+        try:
+            stats_dir = RESULT_IMAGES_DIR
+            games_dir = GAMES_DIR_PATH
+            
+            # Получаем файлы статистики
+            stats_files = set()
+            if os.path.exists(stats_dir):
+                for filename in os.listdir(stats_dir):
+                    if filename.startswith("game_") and filename.endswith((".jpg", ".jpeg", ".png")):
+                        game_number = self.extract_game_number(filename)
+                        if game_number:
+                            stats_files.add(game_number)
+            
+            # Получаем игры без статистики
+            games_without_stats = []
+            if os.path.exists(games_dir):
+                for filename in os.listdir(games_dir):
+                    if filename.startswith("game_") and filename.endswith(".json"):
+                        game_number = self.extract_game_number(filename)
+                        if game_number and game_number not in stats_files:
+                            if league:
+                                # Проверяем лигу
+                                file_path = os.path.join(games_dir, filename)
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    game_data = json.load(f)
+                                game_league = self.get_game_league(game_data)
+                                if game_league != league:
+                                    continue
+                            
+                            games_without_stats.append({
+                                'file_name': filename,
+                                'game_number': game_number,
+                                'path': os.path.join(games_dir, filename)
+                            })
+            
+            games_without_stats.sort(key=lambda x: x['game_number'], reverse=True)
+            return games_without_stats[:5]
+        except Exception as e:
+            logger.error(f"Ошибка локального получения игр без статистики: {e}")
+            return []

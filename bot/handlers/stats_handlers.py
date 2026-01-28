@@ -54,8 +54,8 @@ class StatsHandlers:
         """Обработка выбора лиги для статистики"""
         context.user_data['stats_league'] = league_name
         
-        # КЭШИРОВАНИЕ: Используем кэшированные игры без статистики
-        games_without_stats = self.bot.get_games_without_stats(league_name)
+        # ИСПОЛЬЗУЕМ ОПТИМИЗИРОВАННЫЙ МЕТОД
+        games_without_stats = self.bot.get_games_without_stats_optimized(league_name)
         
         if not games_without_stats:
             keyboard = [
@@ -66,8 +66,7 @@ class StatsHandlers:
             
             await query.edit_message_text(
                 f"🏆 Лига: {league_name}\n\n"
-                "❌ Нет игр без статистики для этой лиги.\n"
-                "Все игры уже имеют изображения со статистикой.",
+                "✅ Все игры уже имеют изображения со статистикой.",
                 reply_markup=reply_markup
             )
             return
@@ -76,7 +75,7 @@ class StatsHandlers:
         games_text += "📊 Игры без статистики (показаны последние 5):\n\n"
         
         keyboard = []
-        for i, game_info in enumerate(games_without_stats[:5], 1):  # Ограничиваем 5 играми
+        for i, game_info in enumerate(games_without_stats[:5], 1):
             game_data = game_info.get('data', {})
             match_info = game_data.get('match_info', {})
             
@@ -86,8 +85,6 @@ class StatsHandlers:
             score = match_info.get('score', '?:?')
             
             button_text = f"{i}. {team_a} vs {team_b} ({score})"
-            
-            # Извлекаем номер игры из кэша
             game_number = game_info.get('game_number', self.bot.github_manager.extract_game_number(game_info['file_name']))
             
             keyboard.append([InlineKeyboardButton(
@@ -115,7 +112,7 @@ class StatsHandlers:
         """Обработка выбора игры для добавления статистики"""
         context.user_data['selected_game_for_stats'] = game_number
         
-        # Используем кэшированную информацию об игре
+        # Используем кэшированный метод для получения полной информации об игре
         game_info = self.bot.get_game_by_number_cached(game_number)
         
         if not game_info:
@@ -125,15 +122,32 @@ class StatsHandlers:
         game_data = game_info.get('data', {})
         match_info = game_data.get('match_info', {})
         
-        team_a = match_info.get('team_a', '?')
-        team_b = match_info.get('team_b', '?')
+        # Получаем информацию из разных возможных мест в структуре данных
+        team_a = match_info.get('team_a') or match_info.get('teamHome') or game_data.get('teamHome') or '?'
+        team_b = match_info.get('team_b') or match_info.get('teamAway') or game_data.get('teamAway') or '?'
         score = match_info.get('score', '?:?')
-        date = match_info.get('date', '?')
-        venue = match_info.get('venue', '?')
+        
+        # Пробуем получить дату из разных мест
+        date = (match_info.get('date') or 
+               game_data.get('date') or 
+               (match_info.get('original_match', {}).get('date') if isinstance(match_info, dict) else None) or 
+               '?')
+        
+        # Пробуем получить зал из разных мест
+        venue = (match_info.get('venue') or 
+                match_info.get('location') or 
+                game_data.get('location') or 
+                (match_info.get('original_match', {}).get('location') if isinstance(match_info, dict) else None) or 
+                '?')
+        
+        # Получаем лигу из контекста или из данных игры
+        league = context.user_data.get('stats_league', 'Неизвестно')
+        if league == 'Неизвестно':
+            league = self.bot.github_manager.get_game_league(game_data)
         
         await query.edit_message_text(
             f"📊 Добавление статистики для игры:\n\n"
-            f"🏆 Лига: {context.user_data.get('stats_league', 'Неизвестно')}\n"
+            f"🏆 Лига: {league}\n"
             f"🏀 {team_a} vs {team_b}\n"
             f"📊 Счет: {score}\n"
             f"📅 Дата: {date}\n"
@@ -176,15 +190,18 @@ class StatsHandlers:
                 await update.message.reply_text("❌ Ошибка: номер игры не найден!")
                 return
             
-            # Получаем информацию об игре из кэша
+            # Получаем информацию об игре
             game_info = self.bot.get_game_by_number_cached(game_number)
-            if game_info:
-                game_data = game_info.get('data', {})
-                match_info = game_data.get('match_info', {})
-                team_a = match_info.get('team_a', '?')
-                team_b = match_info.get('team_b', '?')
-            else:
-                team_a = team_b = "Неизвестно"
+            if not game_info:
+                await update.message.reply_text("❌ Ошибка: данные игры не найдены!")
+                return
+            
+            game_data = game_info.get('data', {})
+            match_info = game_data.get('match_info', {})
+            
+            # Извлекаем информацию о командах с учетом разных форматов
+            team_a = match_info.get('team_a') or match_info.get('teamHome') or game_data.get('teamHome') or 'Неизвестно'
+            team_b = match_info.get('team_b') or match_info.get('teamAway') or game_data.get('teamAway') or 'Неизвестно'
             
             user = update.message.from_user
             username = parse_user_info(user)
@@ -225,7 +242,7 @@ class StatsHandlers:
             await main_handlers.show_main_menu(update, context)
             
         except Exception as e:
-            logger.error(f"Ошибка при обработке изображения статистики: {e}")
+            logger.error(f"Ошибка при обработке изображения статистики: {e}", exc_info=True)
             await update.message.reply_text(
                 "❌ Произошла ошибка при обработке изображения.\n"
                 "Попробуйте снова."

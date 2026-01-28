@@ -164,10 +164,31 @@ class BasketballChampionshipBot:
     
     def get_game_by_number_cached(self, game_number):
         """Получить игру по номеру с использованием кэша"""
+        # Проверяем в кэше игр без статистики
+        for cache_key in self._games_without_stats_cache:
+            if cache_key in self._games_without_stats_cache:
+                for game_info in self._games_without_stats_cache[cache_key]:
+                    if game_info.get('game_number') == game_number:
+                        return game_info
+        
+        # Если не нашли в кэше, ищем во всех играх
         all_games = self.get_all_games_cached()
         for game_info in all_games:
             if self.github_manager.extract_game_number(game_info['file_name']) == game_number:
+                # Добавляем номер игры для быстрого доступа
+                game_info['game_number'] = game_number
                 return game_info
+        
+        # Если не нашли, загружаем напрямую
+        filename = f"game_{game_number:03d}.json"
+        game_data = self.github_manager._load_game_data(filename)
+        if game_data:
+            return {
+                'file_name': filename,
+                'data': game_data,
+                'game_number': game_number,
+                'path': f"{GAMES_DIR_PATH}/{filename}"
+            }
         return None
     
     def update_games_cache_after_stats_added(self, game_number):
@@ -183,3 +204,75 @@ class BasketballChampionshipBot:
                     game for game in self._games_without_stats_cache[key] 
                     if game.get('game_number') != game_number
                 ]
+
+    def get_games_without_stats_optimized(self, league=None):
+        """Оптимизированное получение игр без статистики"""
+        cache_key = league or 'all'
+        current_time = time.time()
+        
+        # Проверяем кэш (актуален в течение 30 секунд)
+        if (cache_key in self._games_without_stats_cache and 
+            current_time - self._games_without_stats_cache_timestamp.get(cache_key, 0) < 30):
+            cached_games = self._games_without_stats_cache[cache_key]
+            # Убедимся, что у всех игр есть данные
+            for game_info in cached_games:
+                if 'data' not in game_info:
+                    game_data = self.github_manager._load_game_data(game_info['file_name'])
+                    if game_data:
+                        game_info['data'] = game_data
+            return cached_games
+        
+        # Используем оптимизированный метод
+        games_without_stats = self.github_manager.get_games_without_statistics_optimized(league)
+        
+        # Дозагружаем данные для отображения
+        for game_info in games_without_stats:
+            if 'data' not in game_info:
+                game_data = self.github_manager._load_game_data(game_info['file_name'])
+                if game_data:
+                    game_info['data'] = game_data
+        
+        # Сохраняем в кэш
+        self._games_without_stats_cache[cache_key] = games_without_stats
+        self._games_without_stats_cache_timestamp[cache_key] = current_time
+        
+        return games_without_stats
+
+    def _load_game_data(self, filename):
+        """Загрузить данные конкретной игры"""
+        try:
+            if not self.github_available:
+                file_path = os.path.join(GAMES_DIR_PATH, filename)
+                if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                return None
+            
+            file_path = f"{GAMES_DIR_PATH}/{filename}"
+            file_content = self.repo.get_contents(file_path)
+            content = base64.b64decode(file_content.content).decode('utf-8')
+            return json.loads(content)
+        except:
+            return None
+
+    def has_games_without_stats(self, league=None):
+        """Быстрая проверка наличия игр без статистики"""
+        try:
+            # Получаем игры со статистикой из кэша
+            games_with_stats = self.get_games_with_statistics()
+            
+            # Получаем все номера игр из папки games
+            all_game_numbers = set()
+            for filename in os.listdir(GAMES_DIR_PATH) if os.path.exists(GAMES_DIR_PATH) else []:
+                if filename.startswith("game_") and filename.endswith(".json"):
+                    game_number = self.github_manager.extract_game_number(filename)
+                    if game_number:
+                        all_game_numbers.add(game_number)
+            
+            # Быстро проверяем, есть ли игры без статистики
+            for game_number in all_game_numbers:
+                if game_number not in games_with_stats:
+                    return True
+            return False
+        except:
+            return False

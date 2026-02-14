@@ -128,17 +128,10 @@ class StatsHandlers:
         score = match_info.get('score', '?:?')
         
         # Пробуем получить дату из разных мест
-        date = (match_info.get('date') or 
-               game_data.get('date') or 
-               (match_info.get('original_match', {}).get('date') if isinstance(match_info, dict) else None) or 
-               '?')
+        date = (match_info.get('date') or  '?')
         
         # Пробуем получить зал из разных мест
-        venue = (match_info.get('venue') or 
-                match_info.get('location') or 
-                game_data.get('location') or 
-                (match_info.get('original_match', {}).get('location') if isinstance(match_info, dict) else None) or 
-                '?')
+        venue = (match_info.get('venue') or '?')
         
         # Получаем лигу из контекста или из данных игры
         league = context.user_data.get('stats_league', 'Неизвестно')

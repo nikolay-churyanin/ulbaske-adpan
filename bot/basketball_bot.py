@@ -16,6 +16,7 @@ class BasketballChampionshipBot:
         self.leagues = {}
         self.venues = []
         self.schedule_data = {"season": "2025-2026", "stages": []}
+        self.leagues_config = {}
         self.pending_matches = []
         self.pending_results = []
         self.temp_files = []
@@ -39,6 +40,9 @@ class BasketballChampionshipBot:
             self.venues = self.github_manager.get_venues_data()
             self.schedule_data = self.github_manager.get_schedule_data()
             
+            # Загружаем конфигурацию лиг
+            self.leagues_config = self.github_manager.get_leagues_config()
+            
             logger.info("Данные успешно загружены")
             return True
             
@@ -60,6 +64,91 @@ class BasketballChampionshipBot:
             leagues[league_name]["full_data"].append(team)
         return leagues
     
+    def determine_game_type(self, league, team_home, team_away, date):
+        """
+        Определить тип игры (regular/playoff) на основе количества сыгранных матчей
+        в регулярном сезоне для данной лиги
+        """
+        try:
+            # Загружаем конфигурацию лиг
+            leagues_config = self.github_manager.get_leagues_config()
+            
+            # Получаем настройки для конкретной лиги
+            league_key = None
+            for key, config in leagues_config.items():
+                if config.get('name') == league:
+                    league_key = key
+                    break
+            
+            if not league_key:
+                logger.warning(f"Лига {league} не найдена в конфигурации, используется regular")
+                return "regular"
+            
+            regular_rounds = leagues_config[league_key].get('regularSeasonRounds', 1)
+            
+            # Получаем все команды лиги
+            teams_in_league = self.leagues.get(league, {}).get('teams', [])
+            num_teams = len(teams_in_league)
+            
+            if num_teams < 2:
+                return "regular"
+            
+            # Количество матчей в регулярном сезоне для каждой команды
+            # В двухкруговом турнире каждая команда играет с каждой дважды
+            matches_per_team_in_regular = (num_teams - 1) * regular_rounds
+            
+            # Получаем все сыгранные матчи для этой лиги
+            all_matches = self.get_all_matches()
+            
+            # Считаем сыгранные матчи для каждой команды
+            team_played_matches = {team: 0 for team in teams_in_league}
+            
+            # Получаем все игры со статистикой (сыгранные)
+            games_with_stats = self.get_games_with_statistics()
+            
+            # Анализируем только игры, которые уже сыграны (есть статистика)
+            for game_info in self.get_all_games_cached():
+                game_number = self.github_manager.extract_game_number(game_info['file_name'])
+                if game_number in games_with_stats:
+                    game_data = game_info.get('data', {})
+                    match_info = game_data.get('match_info', {})
+                    
+                    game_league = match_info.get('competition', '')
+                    # Извлекаем лигу из названия соревнования
+                    for key, config in leagues_config.items():
+                        if config.get('name') in game_league:
+                            game_league = config.get('name')
+                            break
+                    
+                    if game_league == league:
+                        team_a = match_info.get('team_a', '')
+                        team_b = match_info.get('team_b', '')
+                        
+                        if team_a in team_played_matches:
+                            team_played_matches[team_a] += 1
+                        if team_b in team_played_matches:
+                            team_played_matches[team_b] += 1
+            
+            # Проверяем, завершен ли регулярный сезон
+            # Регулярный сезон считается завершенным, если все команды сыграли
+            # необходимое количество матчей
+            regular_season_finished = True
+            for team, played in team_played_matches.items():
+                if played < matches_per_team_in_regular:
+                    regular_season_finished = False
+                    break
+            
+            # Если регулярный сезон завершен, то это плей-офф
+            if regular_season_finished:
+                logger.info(f"Регулярный сезон для лиги {league} завершен. Матч определяется как playoff")
+                return "playoff"
+            else:
+                return "regular"
+                
+        except Exception as e:
+            logger.error(f"Ошибка при определении gameType: {e}")
+            return "regular"
+
     def get_all_matches(self):
         """Получить все матчи из расписания в плоском формате"""
         all_matches = []

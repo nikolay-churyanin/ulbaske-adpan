@@ -323,7 +323,7 @@ class BotApplication:
                     success_count += 1
                     
                     # Удаляем матч из расписания после сохранения результата
-                    match_to_remove = result['original_match']
+                    match_to_remove = result['match_info']
                     for stage in self.bot.schedule_data.get("stages", []):
                         stage["games"] = [game for game in stage.get("games", []) 
                                         if not (game.get("teamHome") == match_to_remove["teamHome"] and 

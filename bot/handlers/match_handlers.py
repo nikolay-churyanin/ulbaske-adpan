@@ -206,6 +206,8 @@ class MatchHandlers:
         user = query.from_user
         username = parse_user_info(user)
         
+        game_type = self.bot.determine_game_type(league, team1, team2, selected_date)
+
         # Создание записи о матче
         match_data = {
             'date': selected_date,
@@ -215,7 +217,8 @@ class MatchHandlers:
             'location': venue,
             'added_by': username,
             'added_at': datetime.now().strftime("%d.%m.%Y %H:%M"),
-            'league': league
+            'league': league,
+            'gameType': game_type
         }
         
         # Добавляем в ожидающие матчи

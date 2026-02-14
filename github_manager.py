@@ -25,6 +25,19 @@ class GitHubManager:
             logger.error(f"Ошибка при инициализации GitHub: {e}")
             self.github_available = False
     
+    def get_leagues_config(self):
+        """Получить конфигурацию лиг"""
+        try:
+            if not self.github_available:
+                return self._load_local_data(CONFIG_FILE_PATH, {})
+            
+            file_content = self.repo.get_contents(CONFIG_FILE_PATH)
+            content = base64.b64decode(file_content.content).decode('utf-8')
+            return json.loads(content)
+        except Exception as e:
+            logger.error(f"Ошибка при загрузке конфигурации лиг: {e}")
+            return self._load_local_data(CONFIG_FILE_PATH, {})
+
     def get_teams_data(self):
         """Получить данные о командах из GitHub или локально"""
         try:

@@ -12,6 +12,7 @@ GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER")
 GITHUB_REPO_NAME = os.getenv("GITHUB_REPO_NAME")
 
 # Пути к файлам
+CONFIG_FILE_PATH = "data/leagues-config.json"
 TEAMS_FILE_PATH = "data/teams.json"
 VENUES_FILE_PATH = "data/venues.json"
 SCHEDULE_FILE_PATH = "data/schedule.json"

@@ -178,7 +178,7 @@ class ScheduleHandlers:
         results_text = "⏳ Результаты, ожидающие применения:\n\n"
         
         for i, result in enumerate(self.bot.pending_results, 1):
-            match = result['original_match']
+            match = result['match_info']
             results_text += (
                 f"{i}. 🏆 {match['league']}\n"
                 f"   🏀 {match['teamHome']} vs {match['teamAway']}\n"

@@ -105,23 +105,21 @@ class ResultHandlers:
                 await update.message.reply_text(f"❌ {result}\nПопробуйте снова:")
                 return
             
-            score_home, score_away = result
-            match = context.user_data['current_match_for_result']
-            
+            game_type = match.get('gameType', 'regular')
+
             # Создаем запись результата
             result_data = {
                 'match_info': {
                     'team_a': match['teamHome'],
                     'team_b': match['teamAway'],
                     'score': f"{score_home}:{score_away}",
-                    'competition': f"Муж. Чемп. Ульян. области {match['league']}",
                     'date': match['date'],
                     'venue': match['location'],
-                    'time': match['time']
+                    'time': match['time'],
+                    'league': match['league'],
+                    'gameType': game_type
                 },
-                'original_match': match,
-                'added_by': username,
-                'added_at': datetime.now().strftime("%d.%m.%Y %H:%M")
+                'added_by': username
             }
             
             # Добавляем в ожидающие результаты
@@ -391,6 +389,7 @@ class ResultHandlers:
             venue = context.user_data.get('new_result_venue')
             date_str = context.user_data.get('new_result_date')
             time_str = context.user_data.get('new_result_time')
+            game_type = context.user_data.get('new_result_gameType')
             
             if not all([league, team_home, team_away, venue, date_str, time_str]):
                 await update.message.reply_text("❌ Ошибка: не все данные заполнены!")
@@ -401,31 +400,19 @@ class ResultHandlers:
                 await main_handlers.show_main_menu(update, context)
                 return
             
-            # Создаем запись матча
-            match_data = {
-                'date': date_str,
-                'time': time_str,
-                'teamHome': team_home,
-                'teamAway': team_away,
-                'location': venue,
-                'league': league,
-                'stage': 'Задним числом'
-            }
-            
             # Создаем запись результата
             result_data = {
                 'match_info': {
                     'team_a': team_home,
                     'team_b': team_away,
                     'score': f"{score_home}:{score_away}",
-                    'competition': f"Муж. Чемп. Ульян. области {league}",
                     'date': date_str,
                     'venue': venue,
-                    'time': time_str
+                    'league': league,
+                    'time': time_str,
+                    'gameType': game_type
                 },
-                'original_match': match_data,
-                'added_by': username,
-                'added_at': datetime.now().strftime("%d.%m.%Y %H:%M")
+                'added_by': username
             }
             
             # Добавляем в ожидающие результаты

@@ -105,6 +105,9 @@ class ResultHandlers:
                 await update.message.reply_text(f"❌ {result}\nПопробуйте снова:")
                 return
             
+            score_home, score_away = result
+            match = context.user_data['current_match_for_result']
+
             game_type = match.get('gameType', 'regular')
 
             # Создаем запись результата

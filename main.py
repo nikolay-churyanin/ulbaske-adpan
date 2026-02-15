@@ -326,8 +326,8 @@ class BotApplication:
                     match_to_remove = result['match_info']
                     for stage in self.bot.schedule_data.get("stages", []):
                         stage["games"] = [game for game in stage.get("games", []) 
-                                        if not (game.get("teamHome") == match_to_remove["teamHome"] and 
-                                               game.get("teamAway") == match_to_remove["teamAway"] and 
+                                        if not (game.get("teamHome") == match_to_remove["team_a"] and 
+                                               game.get("teamAway") == match_to_remove["team_b"] and 
                                                game.get("date") == match_to_remove["date"] and 
                                                game.get("time") == match_to_remove["time"])]
             

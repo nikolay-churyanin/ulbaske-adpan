@@ -82,15 +82,11 @@ class BotApplication:
             await self.league_handlers.show_league_management(query, context)
         elif data == "show_venues":
             await self.venue_handlers.show_venues_management(query, context)
+        
         elif data == "stats_menu":
             await self.stats_handlers.show_stats_menu(query, context)
-        elif data == "add_stats_select_league":
-            await self.stats_handlers.show_league_selection_for_stats(query, context)
-        
-        # Обработка статистики
-        elif data.startswith("stats_league_"):
-            league_name = data.replace("stats_league_", "")
-            await self.stats_handlers.handle_league_selection_for_stats(query, context, league_name)
+        elif data == "stats_refresh":
+            await self.stats_handlers.refresh_stats_list(query, context)
         elif data.startswith("select_stats_game_"):
             game_number = int(data.replace("select_stats_game_", ""))
             await self.stats_handlers.handle_game_selection_for_stats(query, context, game_number)
@@ -283,7 +279,8 @@ class BotApplication:
                     "teamHome": match['teamHome'],
                     "teamAway": match['teamAway'],
                     "location": match['location'],
-                    "league": match['league']
+                    "league": match['league'],
+                    "gameType": match['gameType']
                 }
                 regular_season["games"].append(game_data)
             

@@ -244,6 +244,7 @@ class MatchHandlers:
             f"🏟️ {venue}\n"
             f"📅 {formatted_date}\n"
             f"⏰ {selected_time}\n"
+            f"📊 Тип: {game_type}\n"  # Добавим для информации
             f"👤 Добавил: {username}\n\n"
             f"⏳ Ожидающих матчей: {len(self.bot.pending_matches)}\n"
             f"Нажмите 'Применить изменения' чтобы сохранить.",
@@ -304,6 +305,8 @@ class MatchHandlers:
             team2 = context.user_data['team2']
             league = context.user_data['current_league']
             
+            game_type = self.bot.determine_game_type(league, team1, team2, selected_date)
+            
             # Создание записи о матче
             match_data = {
                 'date': selected_date,
@@ -313,7 +316,8 @@ class MatchHandlers:
                 'location': venue,
                 'added_by': username,
                 'added_at': datetime.now().strftime("%d.%m.%Y %H:%M"),
-                'league': league
+                'league': league,
+                'gameType': game_type  # Используем определенную переменную
             }
             
             # Добавляем в ожидающие матчи
@@ -339,6 +343,7 @@ class MatchHandlers:
                 f"🏟️ {venue}\n"
                 f"📅 {formatted_date}\n"
                 f"⏰ {selected_time}\n"
+                f"📊 Тип: {game_type}\n"  # Добавим для информации
                 f"👤 Добавил: {username}\n\n"
                 f"⏳ Ожидающих матчей: {len(self.bot.pending_matches)}\n"
                 f"Нажмите 'Применить изменения' чтобы сохранить.",
@@ -387,16 +392,24 @@ class MatchHandlers:
                 await update.message.reply_text("❌ Дата должна быть в будущем! Попробуйте снова:")
                 return
             
+            league = context.user_data['current_league']
+            team1 = context.user_data['team1']
+            team2 = context.user_data['team2']
+            
+            # ОПРЕДЕЛЯЕМ ТИП ИГРЫ
+            game_type = self.bot.determine_game_type(league, team1, team2, date_str)
+            
             # Создание записи о матче в формате schedule.json
             match_data = {
                 'date': date_str,
                 'time': time_str,
-                'teamHome': context.user_data['team1'],
-                'teamAway': context.user_data['team2'],
+                'teamHome': team1,
+                'teamAway': team2,
                 'location': context.user_data['venue'],
                 'added_by': username,
                 'added_at': datetime.now().strftime("%d.%m.%Y %H:%M"),
-                'league': context.user_data['current_league']
+                'league': league,
+                'gameType': game_type  # Добавляем тип игры
             }
             
             # Добавляем в ожидающие матчи
@@ -419,6 +432,7 @@ class MatchHandlers:
                 f"🏀 {match_data['teamHome']} vs {match_data['teamAway']}\n"
                 f"🏟️ {match_data['location']}\n"
                 f"📅 {match_data['date']} {match_data['time']}\n"
+                f"📊 Тип: {game_type}\n"
                 f"👤 Добавил: {username}\n\n"
                 f"⏳ Ожидающих матчей: {len(self.bot.pending_matches)}\n"
                 f"Нажмите 'Применить изменения' чтобы сохранить.",

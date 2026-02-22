@@ -73,18 +73,19 @@ class BasketballChampionshipBot:
             # Загружаем конфигурацию лиг
             leagues_config = self.github_manager.get_leagues_config()
             
-            # Получаем настройки для конкретной лиги
-            league_key = None
-            for key, config in leagues_config.items():
-                if config.get('name') == league:
-                    league_key = key
+            # Находим ID лиги по её названию
+            league_id = None
+            for lid, config in leagues_config.items():
+                if lid == league:
+                    league_id = lid
                     break
             
-            if not league_key:
-                logger.warning(f"Лига {league} не найдена в конфигурации, используется regular")
+            if not league_id:
+                logger.warning(f"Лига '{league}' не найдена в конфигурации, используется regular")
                 return "regular"
             
-            regular_rounds = leagues_config[league_key].get('regularSeasonRounds', 1)
+            # Получаем количество кругов регулярного сезона
+            regular_rounds = leagues_config[league_id].get('regularSeasonRounds', 1)
             
             # Получаем все команды лиги
             teams_in_league = self.leagues.get(league, {}).get('teams', [])
@@ -97,56 +98,52 @@ class BasketballChampionshipBot:
             # В двухкруговом турнире каждая команда играет с каждой дважды
             matches_per_team_in_regular = (num_teams - 1) * regular_rounds
             
-            # Получаем все сыгранные матчи для этой лиги
-            all_matches = self.get_all_matches()
+            # Получаем ВСЕ сыгранные матчи (по наличию файлов в games/)
+            all_played_games = self.get_all_games_cached()
             
-            # Считаем сыгранные матчи для каждой команды
+            # Словарь для подсчета сыгранных матчей каждой команды
             team_played_matches = {team: 0 for team in teams_in_league}
             
-            # Получаем все игры со статистикой (сыгранные)
-            games_with_stats = self.get_games_with_statistics()
-            
-            # Анализируем только игры, которые уже сыграны (есть статистика)
-            for game_info in self.get_all_games_cached():
-                game_number = self.github_manager.extract_game_number(game_info['file_name'])
-                if game_number in games_with_stats:
-                    game_data = game_info.get('data', {})
-                    match_info = game_data.get('match_info', {})
+            for game_info in all_played_games:
+                game_data = game_info.get('data', {})
+                match_info = game_data.get('match_info', {})
+                
+                # Получаем лигу из данных игры
+                game_league = match_info.get('league') or match_info.get('competition', '')
+                
+                # Проверяем, относится ли игра к нужной лиге
+                if game_league == league:
+                    team_a = match_info.get('team_a', '')
+                    team_b = match_info.get('team_b', '')
                     
-                    game_league = match_info.get('competition', '')
-                    # Извлекаем лигу из названия соревнования
-                    for key, config in leagues_config.items():
-                        if config.get('name') in game_league:
-                            game_league = config.get('name')
-                            break
-                    
-                    if game_league == league:
-                        team_a = match_info.get('team_a', '')
-                        team_b = match_info.get('team_b', '')
-                        
-                        if team_a in team_played_matches:
-                            team_played_matches[team_a] += 1
-                        if team_b in team_played_matches:
-                            team_played_matches[team_b] += 1
+                    if team_a in team_played_matches:
+                        team_played_matches[team_a] += 1
+                    if team_b in team_played_matches:
+                        team_played_matches[team_b] += 1
             
-            # Проверяем, завершен ли регулярный сезон
-            # Регулярный сезон считается завершенным, если все команды сыграли
-            # необходимое количество матчей
+            # Логируем статистику для отладки
+            logger.info(f"Статистика сыгранных матчей для лиги '{league}' (определено по файлам в games/):")
+            for team, played in team_played_matches.items():
+                logger.info(f"  {team}: {played}/{matches_per_team_in_regular}")
+            
+            # Проверяем, завершен ли регулярный сезон для КАЖДОЙ команды
             regular_season_finished = True
+            teams_not_finished = []
+            
             for team, played in team_played_matches.items():
                 if played < matches_per_team_in_regular:
                     regular_season_finished = False
-                    break
+                    teams_not_finished.append(f"{team} ({played}/{matches_per_team_in_regular})")
             
-            # Если регулярный сезон завершен, то это плей-офф
             if regular_season_finished:
-                logger.info(f"Регулярный сезон для лиги {league} завершен. Матч определяется как playoff")
+                logger.info(f"✅ Регулярный сезон для лиги '{league}' завершен. Матч определяется как playoff")
                 return "playoff"
             else:
+                logger.info(f"❌ Регулярный сезон для лиги '{league}' не завершен. Не сыграли: {', '.join(teams_not_finished)}")
                 return "regular"
                 
         except Exception as e:
-            logger.error(f"Ошибка при определении gameType: {e}")
+            logger.error(f"Ошибка при определении gameType для лиги '{league}': {e}")
             return "regular"
 
     def get_all_matches(self):
@@ -224,7 +221,6 @@ class BasketballChampionshipBot:
             current_time - self._games_cache_timestamp < 60):
             return self._games_cache
         
-        # Загружаем игры
         games = self.github_manager.get_all_games()
         
         # Сохраняем в кэш
@@ -365,3 +361,36 @@ class BasketballChampionshipBot:
             return False
         except:
             return False
+
+    def get_all_games_without_stats(self):
+        """Получить все игры без статистики (без фильтрации по лигам)"""
+        cache_key = 'all_games_no_stats'
+        
+        # Проверяем кэш (актуален в течение 30 секунд)
+        current_time = time.time()
+        if (cache_key in self._games_without_stats_cache and 
+            current_time - self._games_without_stats_cache_timestamp.get(cache_key, 0) < 30):
+            return self._games_without_stats_cache[cache_key]
+        
+        # Получаем игры со статистикой из кэша
+        games_with_stats = self.get_games_with_statistics()
+        
+        # Получаем все игры из кэша
+        all_games = self.get_all_games_cached()
+        games_without_stats = []
+        
+        for game in all_games:
+            game_number = self.github_manager.extract_game_number(game['file_name'])
+            if game_number not in games_with_stats:
+                # Добавляем номер игры в объект для быстрого доступа
+                game['game_number'] = game_number
+                games_without_stats.append(game)
+        
+        # Сортируем по номеру игры (по убыванию - самые новые первые)
+        games_without_stats.sort(key=lambda x: x['game_number'], reverse=True)
+        
+        # Сохраняем в кэш
+        self._games_without_stats_cache[cache_key] = games_without_stats
+        self._games_without_stats_cache_timestamp[cache_key] = current_time
+        
+        return games_without_stats[:10]  # Возвращаем только 10 последних игр

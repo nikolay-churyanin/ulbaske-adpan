@@ -112,7 +112,10 @@ class MainHandlers:
             'team2', 'venue', 'selected_date', 'current_edit_match', 
             'current_edit_index', 'matches_for_editing',
             'available_matches_for_result', 'current_match_for_result',
-            'waiting_for_stats_image', 'selected_game_for_stats', 'stats_league'
+            'waiting_for_stats_image', 'selected_game_for_stats',  # убрали stats_league
+            'new_result_league', 'new_result_team1', 'new_result_team2',
+            'new_result_venue', 'new_result_date', 'new_result_time',
+            'new_result_username', 'new_result_gameType'
         ]
         
         for state in states_to_clear:

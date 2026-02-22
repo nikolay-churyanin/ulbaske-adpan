@@ -227,7 +227,7 @@ class GitHubManager:
             return []
     
     def get_all_games(self):
-        """Получить все игры"""
+        """Получить все игры из папки games/"""
         try:
             if not self.github_available:
                 return self._get_local_games()
@@ -246,8 +246,13 @@ class GitHubManager:
                                 'data': game_data,
                                 'path': item.path
                             })
-                        except:
-                            continue
+                        except Exception as e:
+                            logger.error(f"Ошибка при загрузке игры {item.name}: {e}")
+                            # Добавляем игру даже без данных (для подсчета)
+                            games.append({
+                                'file_name': item.name,
+                                'path': item.path
+                            })
             except:
                 pass  # Папка games может не существовать
             
@@ -448,8 +453,13 @@ class GitHubManager:
                             'data': game_data,
                             'path': file_path
                         })
-                    except:
-                        continue
+                    except Exception as e:
+                        logger.error(f"Ошибка при загрузке локальной игры {filename}: {e}")
+                        # Добавляем игру даже без данных
+                        games.append({
+                            'file_name': filename,
+                            'path': os.path.join(games_dir, filename)
+                        })
             
             return games
         except Exception as e:
@@ -564,6 +574,57 @@ class GitHubManager:
                 
         except Exception as e:
             logger.error(f"Ошибка при получении игр без статистики (оптимизированно): {e}")
+            return []
+
+    def get_all_games_without_statistics(self):
+        """Получить все игры без статистики (без фильтрации)"""
+        try:
+            # Получаем файлы статистики
+            stats_files = set()
+            try:
+                contents = self.repo.get_contents(RESULT_IMAGES_DIR)
+                for item in contents:
+                    if item.name.startswith("game_") and item.name.endswith((".jpg", ".jpeg", ".png")):
+                        game_number = self.extract_game_number(item.name)
+                        if game_number:
+                            stats_files.add(game_number)
+            except:
+                pass  # Папка может не существовать
+            
+            # Получаем все игры
+            all_games = []
+            try:
+                contents = self.repo.get_contents(GAMES_DIR_PATH)
+                for item in contents:
+                    if item.name.startswith("game_") and item.name.endswith(".json"):
+                        game_number = self.extract_game_number(item.name)
+                        if game_number and game_number not in stats_files:
+                            # Загружаем данные для отображения
+                            try:
+                                file_content = base64.b64decode(item.content).decode('utf-8')
+                                game_data = json.loads(file_content)
+                                all_games.append({
+                                    'file_name': item.name,
+                                    'game_number': game_number,
+                                    'data': game_data,
+                                    'path': item.path
+                                })
+                            except:
+                                # Если не удалось загрузить данные, добавляем без них
+                                all_games.append({
+                                    'file_name': item.name,
+                                    'game_number': game_number,
+                                    'path': item.path
+                                })
+            except:
+                pass
+            
+            # Сортируем по номеру игры (по убыванию)
+            all_games.sort(key=lambda x: x['game_number'], reverse=True)
+            return all_games[:10]  # Возвращаем только 10 последних
+            
+        except Exception as e:
+            logger.error(f"Ошибка при получении всех игр без статистики: {e}")
             return []
 
     def _get_local_games_without_stats_optimized(self, league=None):

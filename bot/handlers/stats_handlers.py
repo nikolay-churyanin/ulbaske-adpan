@@ -11,71 +11,28 @@ class StatsHandlers:
     
     async def show_stats_menu(self, query, context):
         """Показать меню управления статистикой"""
-        keyboard = [
-            [InlineKeyboardButton("📊 Добавить статистику к игре", callback_data="add_stats_select_league")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            "📊 Управление статистикой матчей\n\n"
-            "Здесь вы можете добавить изображение со статистикой для завершенной игры.",
-            reply_markup=reply_markup
-        )
-    
-    async def show_league_selection_for_stats(self, query, context):
-        """Показать выбор лиги для добавления статистики"""
-        if not self.bot.leagues:
-            keyboard = [[InlineKeyboardButton("🔄 Обновить данные", callback_data="refresh_data")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                "❌ Нет данных о лигах. Попробуйте обновить данные.",
-                reply_markup=reply_markup
-            )
-            return
-        
-        keyboard = []
-        for league_name in self.bot.leagues.keys():
-            team_count = len(self.bot.leagues[league_name]["teams"])
-            keyboard.append([InlineKeyboardButton(
-                f"{league_name} ({team_count} команд)", 
-                callback_data=f"stats_league_{league_name}"
-            )])
-        
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="stats_menu")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            "Выберите лигу для добавления статистики:",
-            reply_markup=reply_markup
-        )
-    
-    async def handle_league_selection_for_stats(self, query, context, league_name):
-        """Обработка выбора лиги для статистики"""
-        context.user_data['stats_league'] = league_name
-        
-        # ИСПОЛЬЗУЕМ ОПТИМИЗИРОВАННЫЙ МЕТОД
-        games_without_stats = self.bot.get_games_without_stats_optimized(league_name)
+        # Получаем все игры без статистики
+        games_without_stats = self.bot.get_all_games_without_stats()
         
         if not games_without_stats:
             keyboard = [
-                [InlineKeyboardButton("🔙 Назад к лигам", callback_data="add_stats_select_league")],
-                [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
+                [InlineKeyboardButton("🔄 Обновить список", callback_data="stats_refresh")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
-                f"🏆 Лига: {league_name}\n\n"
-                "✅ Все игры уже имеют изображения со статистикой.",
+                "📊 Управление статистикой матчей\n\n"
+                "✅ У всех игр уже есть изображения со статистикой!",
                 reply_markup=reply_markup
             )
             return
         
-        games_text = f"🏆 Лига: {league_name}\n\n"
-        games_text += "📊 Игры без статистики (показаны последние 5):\n\n"
+        # Показываем список игр без статистики
+        games_text = "📊 Игры без статистики (показаны последние 10):\n\n"
         
         keyboard = []
-        for i, game_info in enumerate(games_without_stats[:5], 1):
+        for i, game_info in enumerate(games_without_stats[:10], 1):
             game_data = game_info.get('data', {})
             match_info = game_data.get('match_info', {})
             
@@ -83,8 +40,10 @@ class StatsHandlers:
             team_a = match_info.get('team_a', '?')
             team_b = match_info.get('team_b', '?')
             score = match_info.get('score', '?:?')
+            date = match_info.get('date', '?')
+            league = match_info.get('league', 'Неизвестная лига')
             
-            button_text = f"{i}. {team_a} vs {team_b} ({score})"
+            button_text = f"{i}. {team_a} vs {team_b} ({score}) - {date}"
             game_number = game_info.get('game_number', self.bot.github_manager.extract_game_number(game_info['file_name']))
             
             keyboard.append([InlineKeyboardButton(
@@ -92,13 +51,11 @@ class StatsHandlers:
                 callback_data=f"select_stats_game_{game_number}"
             )])
             
-            # Добавляем в текст сообщения
-            date = match_info.get('date', '?')
-            games_text += f"{i}. {team_a} vs {team_b} ({score})\n   📅 {date}\n\n"
+            games_text += f"{i}. 🏆 {league}\n   🏀 {team_a} vs {team_b} ({score})\n   📅 {date}\n\n"
         
         keyboard.append([
-            InlineKeyboardButton("🔙 Назад к лигам", callback_data="add_stats_select_league"),
-            InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")
+            InlineKeyboardButton("🔄 Обновить список", callback_data="stats_refresh"),
+            InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")
         ])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -112,7 +69,7 @@ class StatsHandlers:
         """Обработка выбора игры для добавления статистики"""
         context.user_data['selected_game_for_stats'] = game_number
         
-        # Используем кэшированный метод для получения полной информации об игре
+        # Получаем полную информацию об игре
         game_info = self.bot.get_game_by_number_cached(game_number)
         
         if not game_info:
@@ -126,17 +83,9 @@ class StatsHandlers:
         team_a = match_info.get('team_a') or match_info.get('teamHome') or game_data.get('teamHome') or '?'
         team_b = match_info.get('team_b') or match_info.get('teamAway') or game_data.get('teamAway') or '?'
         score = match_info.get('score', '?:?')
-        
-        # Пробуем получить дату из разных мест
-        date = (match_info.get('date') or  '?')
-        
-        # Пробуем получить зал из разных мест
-        venue = (match_info.get('venue') or '?')
-        
-        # Получаем лигу из контекста или из данных игры
-        league = context.user_data.get('stats_league', 'Неизвестно')
-        if league == 'Неизвестно':
-            league = self.bot.github_manager.get_game_league(game_data)
+        date = match_info.get('date', '?')
+        venue = match_info.get('venue', '?')
+        league = match_info.get('league', 'Неизвестно')
         
         await query.edit_message_text(
             f"📊 Добавление статистики для игры:\n\n"
@@ -192,7 +141,7 @@ class StatsHandlers:
             game_data = game_info.get('data', {})
             match_info = game_data.get('match_info', {})
             
-            # Извлекаем информацию о командах с учетом разных форматов
+            # Извлекаем информацию о командах
             team_a = match_info.get('team_a') or match_info.get('teamHome') or game_data.get('teamHome') or 'Неизвестно'
             team_b = match_info.get('team_b') or match_info.get('teamAway') or game_data.get('teamAway') or 'Неизвестно'
             
@@ -228,7 +177,6 @@ class StatsHandlers:
             # Очистка временных данных
             context.user_data.pop('waiting_for_stats_image', None)
             context.user_data.pop('selected_game_for_stats', None)
-            context.user_data.pop('stats_league', None)
             
             from bot.handlers.main_handlers import MainHandlers
             main_handlers = MainHandlers(self.bot)
@@ -240,3 +188,14 @@ class StatsHandlers:
                 "❌ Произошла ошибка при обработке изображения.\n"
                 "Попробуйте снова."
             )
+    
+    async def refresh_stats_list(self, query, context):
+        """Обновить список игр без статистики"""
+        # Сбрасываем кэш
+        self.bot._games_without_stats_cache = {}
+        self.bot._games_without_stats_cache_timestamp = {}
+        self.bot._games_cache = None
+        self.bot._games_with_stats_cache = None
+        
+        # Показываем обновленный список
+        await self.show_stats_menu(query, context)

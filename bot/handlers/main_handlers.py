@@ -48,6 +48,7 @@ class MainHandlers:
         if pending_matches_count > 0 or pending_results_count > 0:
             keyboard.insert(3, [InlineKeyboardButton("✅ Применить изменения", callback_data="apply_changes")])
         
+        keyboard.append([InlineKeyboardButton("📆 Выбрать сезон", callback_data="select_season")])
         keyboard.append([InlineKeyboardButton("🔄 Обновить данные", callback_data="refresh_data")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -60,9 +61,9 @@ class MainHandlers:
         
         text = (
             "🏀 Добро пожаловать в бот чемпионата по баскетболу!\n\n"
-            f"📊 Сезон: {self.bot.schedule_data.get('season', 'Не указан')}\n"
-            "📊 Статистика:\n"
-            f"• Всего матчей: {total_matches}\n"
+            f"📆 Сезон: {self.bot.season_label()}\n"
+            "📊 Статистика предстоящих матчей:\n"
+            f"• Всего матчей без счёта: {total_matches}\n"
             f"• Доступных залов: {len(self.bot.venues)}\n"
         )
         
@@ -73,9 +74,12 @@ class MainHandlers:
             
         text += "• Лиги и команды:\n"
         
-        for league_name, league_data in self.bot.leagues.items():
-            match_count = matches_by_league.get(league_name, 0)
-            text += f"  - {league_name}: {len(league_data['teams'])} команд, {match_count} матчей\n"
+        for league_id, league_data in self.bot.leagues.items():
+            match_count = matches_by_league.get(league_id, 0)
+            text += (
+                f"  - {self.bot.league_label(league_id)}: "
+                f"{len(league_data['teams'])} команд, {match_count} матчей\n"
+            )
         
         text += "\nВыберите действие:"
         
@@ -101,6 +105,47 @@ class MainHandlers:
             await query.edit_message_text(status_msg)
         else:
             await query.edit_message_text("❌ Не удалось обновить данные!")
+        await self.show_main_menu(query, context, is_query=True)
+
+    async def show_season_selection(self, query, context):
+        seasons = (self.bot.github_manager.catalog or {}).get("seasons") or []
+        if not seasons:
+            await query.edit_message_text("❌ В data/seasons.json нет сезонов.")
+            await self.show_main_menu(query, context, is_query=True)
+            return
+
+        keyboard = []
+        for item in seasons:
+            season_id = item.get("id")
+            if not season_id:
+                continue
+            label = item.get("label") or season_id
+            if item.get("archived"):
+                label = f"{label} (архив)"
+            if season_id == self.bot.github_manager.season_id:
+                label = f"✅ {label}"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"season_{season_id}")])
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
+
+        await query.edit_message_text(
+            "Выберите сезон для работы с games.json:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def handle_season_selection(self, query, context, season_id):
+        if self.bot.pending_matches or self.bot.pending_results:
+            await query.edit_message_text(
+                "❌ Сначала примените или сбросьте очередь изменений, "
+                "потом можно сменить сезон."
+            )
+            await self.show_main_menu(query, context, is_query=True)
+            return
+
+        success = self.bot.load_data_from_github(season_id)
+        if success:
+            await query.edit_message_text(f"✅ Выбран сезон: {self.bot.season_label()}")
+        else:
+            await query.edit_message_text("❌ Не удалось загрузить выбранный сезон.")
         await self.show_main_menu(query, context, is_query=True)
 
     def _clear_user_states(self, context):

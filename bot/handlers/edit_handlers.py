@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from datetime import datetime
 import logging
-from utils.helpers import parse_user_info, convert_to_timestamp
+from utils.helpers import parse_user_info
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class EditHandlers:
         schedule_text = "✏️ Выберите матч для редактирования:\n\n"
         for i, match in enumerate(all_matches, 1):
             schedule_text += (
-                f"{i}. 🏆 {match['league']}\n"
+                f"{i}. 🏆 {self.bot.league_label(match['league'])}\n"
                 f"   🏀 {match['teamHome']} vs {match['teamAway']}\n"
                 f"   🏟️ {match['location']}\n"
                 f"   📅 {match['date']} {match['time']}\n\n"
@@ -58,7 +58,7 @@ class EditHandlers:
         
         match_text = (
             f"✏️ Редактирование матча:\n\n"
-            f"🏆 Лига: {match['league']}\n"
+            f"🏆 Лига: {self.bot.league_label(match['league'])}\n"
             f"🏀 {match['teamHome']} vs {match['teamAway']}\n"
             f"🏟️ Зал: {match['location']}\n"
             f"📅 Дата: {match['date']}\n"
@@ -125,19 +125,14 @@ class EditHandlers:
             await query.edit_message_text("❌ Ошибка: матч не найден!")
             return
         
-        # Обновляем зал в расписании
-        success = self.update_match_in_schedule(
-            match, 
-            new_location=new_venue
-        )
+        success = self.bot.update_game_fields(match, location=new_venue)
         
         if success:
             user = query.from_user
             username = parse_user_info(user)
             
-            # Сохраняем изменения
             commit_message = f"Изменен зал матча: {match['teamHome']} vs {match['teamAway']} | Новый зал: {new_venue} | Изменил: {username}"
-            save_success = self.bot.github_manager.save_schedule_to_github(self.bot.schedule_data, commit_message)
+            save_success = self.bot.save_games(commit_message)
             
             if save_success:
                 await query.edit_message_text(
@@ -171,7 +166,7 @@ class EditHandlers:
             "📅 Введите дату и время в формате:\n"
             "ДД.ММ.ГГГГ ЧЧ:ММ\n\n"
             "Например: 15.12.2024 18:30\n\n"
-            "Или в формате как в schedule.json:\n"
+            "Или в формате как в games.json:\n"
             "ГГГГ-ММ-ДД ЧЧ:ММ\n"
             "Например: 2025-10-11 12:00"
         )
@@ -200,7 +195,7 @@ class EditHandlers:
                 new_time_str = match_date.strftime("%H:%M")
             except ValueError:
                 try:
-                    # Формат ГГГГ-ММ-ДД ЧЧ:ММ (как в schedule.json)
+                    # Формат ГГГГ-ММ-ДД ЧЧ:ММ (как в games.json)
                     match_date = datetime.strptime(date_text, "%Y-%m-%d %H:%M")
                     new_date_str = match_date.strftime("%Y-%m-%d")
                     new_time_str = match_date.strftime("%H:%M")
@@ -213,17 +208,15 @@ class EditHandlers:
                     )
                     return
             
-            # Обновляем дату и время в расписании
-            success = self.update_match_in_schedule(
-                match, 
-                new_date=new_date_str,
-                new_time=new_time_str
+            success = self.bot.update_game_fields(
+                match,
+                date=new_date_str,
+                time=new_time_str
             )
             
             if success:
-                # Сохраняем изменения
                 commit_message = f"Изменена дата матча: {match['teamHome']} vs {match['teamAway']} | Новая дата: {new_date_str} {new_time_str} | Изменил: {username}"
-                save_success = self.bot.github_manager.save_schedule_to_github(self.bot.schedule_data, commit_message)
+                save_success = self.bot.save_games(commit_message)
                 
                 if save_success:
                     await update.message.reply_text(
@@ -255,30 +248,6 @@ class EditHandlers:
                 "Попробуйте снова:"
             )
     
-    def update_match_in_schedule(self, match_to_update, new_date=None, new_time=None, new_location=None):
-        """Обновить матч в расписании"""
-        try:
-            for stage in self.bot.schedule_data.get("stages", []):
-                for game in stage.get("games", []):
-                    if (game.get("teamHome") == match_to_update["teamHome"] and 
-                        game.get("teamAway") == match_to_update["teamAway"] and 
-                        game.get("date") == match_to_update["date"] and 
-                        game.get("time") == match_to_update["time"]):
-                        
-                        # Обновляем поля
-                        if new_date:
-                            game["date"] = new_date
-                        if new_time:
-                            game["time"] = new_time
-                        if new_location:
-                            game["location"] = new_location
-                        
-                        return True
-            return False
-        except Exception as e:
-            logger.error(f"Ошибка при обновлении матча: {e}")
-            return False
-    
     async def delete_match(self, query, context, match_index):
         """Удалить матч"""
         try:
@@ -286,21 +255,15 @@ class EditHandlers:
             
             if 0 <= match_index < len(all_matches):
                 match_to_delete = all_matches[match_index]
+                if not self.bot.delete_game(match_to_delete):
+                    await query.edit_message_text("❌ Матч не найден в games.json!")
+                    return
                 
-                # Удаляем матч из структуры данных
-                for stage in self.bot.schedule_data.get("stages", []):
-                    stage["games"] = [game for game in stage.get("games", []) 
-                                    if not (game.get("teamHome") == match_to_delete["teamHome"] and 
-                                           game.get("teamAway") == match_to_delete["teamAway"] and 
-                                           game.get("date") == match_to_delete["date"] and 
-                                           game.get("time") == match_to_delete["time"])]
-                
-                # Сохраняем изменения
                 user = query.from_user
                 username = parse_user_info(user)
                 
                 commit_message = f"Удален матч: {match_to_delete['teamHome']} vs {match_to_delete['teamAway']} | Удалил: {username}"
-                success = self.bot.github_manager.save_schedule_to_github(self.bot.schedule_data, commit_message)
+                success = self.bot.save_games(commit_message)
                 
                 if success:
                     await query.edit_message_text(f"✅ Матч удален!")

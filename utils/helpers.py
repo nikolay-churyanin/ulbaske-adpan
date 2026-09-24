@@ -23,6 +23,17 @@ def parse_user_info(user):
     else:
         return user.first_name or "Неизвестный пользователь"
 
+def game_has_score(info):
+    """Есть ли у записи матча счёт."""
+    if not isinstance(info, dict):
+        return False
+    score = info.get("score")
+    if isinstance(score, str) and ":" in score:
+        parts = score.split(":")
+        return len(parts) == 2 and all(part.strip().isdigit() for part in parts)
+    return False
+
+
 def validate_score_input(score_text):
     """Проверить корректность введенного счета"""
     if ":" not in score_text:
@@ -142,22 +153,19 @@ def get_next_weekend_dates():
     
     return weekend_dates
 
-def get_available_times_for_venue(venue, date, schedule_data):
+def get_available_times_for_venue(venue, date, games):
     """Получить доступные времена для зала на указанную дату"""
-    # Стандартные временные слоты
     standard_times = [
-        "09:00", "10:30", "12:00", "13:30", "15:00", 
+        "09:00", "10:30", "12:00", "13:30", "15:00",
         "16:30", "18:00", "19:30", "21:00"
     ]
-    
-    # Получаем все матчи в этом зале на эту дату
+
     occupied_times = []
-    for stage in schedule_data.get("stages", []):
-        for game in stage.get("games", []):
-            if (game.get("location") == venue and 
-                game.get("date") == date and 
-                game.get("time")):
-                occupied_times.append(game.get("time"))
+    for game in games or []:
+        info = game.get("match_info") or game
+        game_venue = info.get("venue") or info.get("location")
+        if game_venue == venue and info.get("date") == date and info.get("time"):
+            occupied_times.append(info.get("time"))
     
     # Фильтруем стандартные времена
     available_times = [time for time in standard_times if time not in occupied_times]

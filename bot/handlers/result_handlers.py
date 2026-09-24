@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from datetime import datetime
 import logging
-from utils.helpers import parse_user_info, validate_score_input, convert_to_timestamp
+from utils.helpers import parse_user_info, validate_score_input, convert_to_timestamp, format_date_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +15,14 @@ class ResultHandlers:
         all_matches = self.bot.get_all_matches()
         
         if not all_matches:
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
+            keyboard = [
+                [InlineKeyboardButton("➕ Результат без анонса", callback_data="add_result_new_match")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
-                "❌ В расписании нет матчей для внесения результатов.",
+                "❌ Нет матчей без счёта для внесения результатов.\n"
+                "Можно добавить результат прошедшей игры сразу в games.json.",
                 reply_markup=reply_markup
             )
             return
@@ -33,10 +37,14 @@ class ResultHandlers:
                 available_matches.append(match)
         
         if not available_matches:
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
+            keyboard = [
+                [InlineKeyboardButton("➕ Результат без анонса", callback_data="add_result_new_match")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
-                "❌ Нет завершенных матчей для внесения результатов.",
+                "❌ Нет завершенных матчей без счёта.\n"
+                "Можно добавить результат прошедшей игры сразу в games.json.",
                 reply_markup=reply_markup
             )
             return
@@ -45,7 +53,7 @@ class ResultHandlers:
         
         for i, match in enumerate(available_matches):
             text += (
-                f"{i+1}. 🏆 {match['league']}\n"
+                f"{i+1}. 🏆 {self.bot.league_label(match['league'])}\n"
                 f"   🏀 {match['teamHome']} vs {match['teamAway']}\n"
                 f"   🏟️ {match['location']}\n"
                 f"   📅 {match['date']} {match['time']}\n\n"
@@ -60,6 +68,7 @@ class ResultHandlers:
         
         context.user_data['available_matches_for_result'] = available_matches
         
+        keyboard.append([InlineKeyboardButton("➕ Результат без анонса", callback_data="add_result_new_match")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -79,7 +88,7 @@ class ResultHandlers:
         
         await query.edit_message_text(
             f"🏀 Введите счет для матча:\n\n"
-            f"🏆 Лига: {match['league']}\n"
+            f"🏆 Лига: {self.bot.league_label(match['league'])}\n"
             f"🏀 {match['teamHome']} vs {match['teamAway']}\n"
             f"🏟️ {match['location']}\n"
             f"📅 {match['date']} {match['time']}\n\n"
@@ -112,7 +121,9 @@ class ResultHandlers:
 
             # Создаем запись результата
             result_data = {
+                'game_id': match.get('id'),
                 'match_info': {
+                    'id': match.get('id'),
                     'team_a': match['teamHome'],
                     'team_b': match['teamAway'],
                     'score': f"{score_home}:{score_away}",
@@ -143,7 +154,7 @@ class ResultHandlers:
             
             await update.message.reply_text(
                 f"✅ Результат добавлен в очередь!\n\n"
-                f"🏆 Лига: {match['league']}\n"
+                f"🏆 Лига: {self.bot.league_label(match['league'])}\n"
                 f"🏀 {match['teamHome']} vs {match['teamAway']}\n"
                 f"📊 Счет: {score_home}:{score_away}\n"
                 f"🏟️ {match['location']}\n"
@@ -186,11 +197,11 @@ class ResultHandlers:
             return
         
         keyboard = []
-        for league_name in self.bot.leagues.keys():
-            team_count = len(self.bot.leagues[league_name]["teams"])
+        for league_id in self.bot.leagues.keys():
+            team_count = len(self.bot.leagues[league_id]["teams"])
             keyboard.append([InlineKeyboardButton(
-                f"{league_name} ({team_count} команд)", 
-                callback_data=f"new_result_league_{league_name}"
+                f"{self.bot.league_label(league_id)} ({team_count} команд)",
+                callback_data=f"new_result_league_{league_id}"
             )])
         
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="add_result_new_match")])
@@ -220,7 +231,7 @@ class ResultHandlers:
         keyboard = []
         row = []
         for i, team in enumerate(available_teams):
-            row.append(InlineKeyboardButton(team, callback_data=f"new_result_{selection_type}_{team}"))
+            row.append(InlineKeyboardButton(team, callback_data=f"{selection_type}_{team}"))
             if len(row) == 2 or i == len(available_teams) - 1:
                 keyboard.append(row)
                 row = []
@@ -234,7 +245,7 @@ class ResultHandlers:
         selection_text = "первую команду" if selection_type == "new_result_team1" else "вторую команду"
         
         await query.edit_message_text(
-            f"🏆 Лига: {league_name}\n"
+            f"🏆 Лига: {self.bot.league_label(league_name)}\n"
             f"Выберите {selection_text}:",
             reply_markup=reply_markup
         )
@@ -262,7 +273,7 @@ class ResultHandlers:
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            f"🏆 Лига: {league_name}\n"
+            f"🏆 Лига: {self.bot.league_label(league_name)}\n"
             f"🏀 Команды: {context.user_data['new_result_team1']} vs {context.user_data['new_result_team2']}\n\n"
             "🏟️ Выберите спортивный зал:",
             reply_markup=reply_markup
@@ -279,13 +290,13 @@ class ResultHandlers:
         today = datetime.now().date()
         
         text = (
-            f"🏆 Лига: {league}\n"
+            f"🏆 Лига: {self.bot.league_label(league)}\n"
             f"🏀 Матч: {team1} vs {team2}\n"
             f"🏟️ Зал: {venue}\n\n"
             "📅 Введите дату и время ПРОШЕДШЕГО матча в формате:\n"
             "ДД.ММ.ГГГГ ЧЧ:ММ\n\n"
             "Например: 15.01.2024 18:30\n\n"
-            "Или в формате как в schedule.json:\n"
+            "Или в формате как в games.json:\n"
             "ГГГГ-ММ-ДД ЧЧ:ММ\n"
             "Например: 2024-01-15 18:30"
         )
@@ -317,7 +328,7 @@ class ResultHandlers:
                 time_str = match_date.strftime("%H:%M")
             except ValueError:
                 try:
-                    # Формат ГГГГ-ММ-ДД ЧЧ:ММ (как в schedule.json)
+                    # Формат ГГГГ-ММ-ДД ЧЧ:ММ (как в games.json)
                     match_date = datetime.strptime(date_text, "%Y-%m-%d %H:%M")
                     date_str = match_date.strftime("%Y-%m-%d")
                     time_str = match_date.strftime("%H:%M")
@@ -392,7 +403,9 @@ class ResultHandlers:
             venue = context.user_data.get('new_result_venue')
             date_str = context.user_data.get('new_result_date')
             time_str = context.user_data.get('new_result_time')
-            game_type = context.user_data.get('new_result_gameType')
+            game_type = context.user_data.get('new_result_gameType') or self.bot.determine_game_type(
+                league, team_home, team_away, date_str
+            )
             
             if not all([league, team_home, team_away, venue, date_str, time_str]):
                 await update.message.reply_text("❌ Ошибка: не все данные заполнены!")
@@ -403,7 +416,6 @@ class ResultHandlers:
                 await main_handlers.show_main_menu(update, context)
                 return
             
-            # Создаем запись результата
             result_data = {
                 'match_info': {
                     'team_a': team_home,
@@ -438,7 +450,7 @@ class ResultHandlers:
             
             await update.message.reply_text(
                 f"✅ Результат добавлен в очередь!\n\n"
-                f"🏆 Лига: {league}\n"
+                f"🏆 Лига: {self.bot.league_label(league)}\n"
                 f"🏀 {team_home} vs {team_away}\n"
                 f"📊 Счет: {score_home}:{score_away}\n"
                 f"🏟️ {venue}\n"

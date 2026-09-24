@@ -15,11 +15,11 @@ class LeagueHandlers:
             return
         
         keyboard = []
-        for league_name in self.bot.leagues.keys():
-            team_count = len(self.bot.leagues[league_name]["teams"])
+        for league_id in self.bot.leagues.keys():
+            team_count = len(self.bot.leagues[league_id]["teams"])
             keyboard.append([InlineKeyboardButton(
-                f"👥 {league_name} ({team_count} команд)", 
-                callback_data=f"view_teams_{league_name}"
+                f"👥 {self.bot.league_label(league_id)} ({team_count} команд)",
+                callback_data=f"view_teams_{league_id}"
             )])
         
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
@@ -50,6 +50,6 @@ class LeagueHandlers:
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            f"🏆 Лига: {league_name}\n\n{teams_text}",
+            f"🏆 Лига: {self.bot.league_label(league_name)}\n\n{teams_text}",
             reply_markup=reply_markup
         )

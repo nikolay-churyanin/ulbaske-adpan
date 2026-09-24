@@ -3,22 +3,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Настройки Telegram
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Настройки GitHub
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER")
 GITHUB_REPO_NAME = os.getenv("GITHUB_REPO_NAME")
 
-# Пути к файлам
-CONFIG_FILE_PATH = "data/leagues-config.json"
-TEAMS_FILE_PATH = "data/teams.json"
-VENUES_FILE_PATH = "data/venues.json"
-SCHEDULE_FILE_PATH = "data/schedule.json"
-GAMES_DIR_PATH = "data/games"
-RESULT_IMAGES_DIR = "data/result"
+SEASONS_CATALOG_PATH = "data/seasons.json"
+DEFAULT_SEASON_ID = os.getenv("CURRENT_SEASON", "").strip() or None
 
-# Настройки логирования
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 LOG_LEVEL = 'INFO'
+
+
+def season_dir(season_id):
+    return f"data/seasons/{season_id}"
+
+
+def season_file(season_id, filename):
+    return f"{season_dir(season_id)}/{filename}"

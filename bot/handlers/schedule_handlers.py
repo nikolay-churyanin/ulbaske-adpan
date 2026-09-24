@@ -45,7 +45,7 @@ class ScheduleHandlers:
         schedule_text += f"• Ожидающих матчей: {pending_matches_count}\n"
         schedule_text += f"• Ожидающих результатов: {pending_results_count}\n"
         for league, count in matches_by_league.items():
-            schedule_text += f"• {league}: {count} матчей\n"
+            schedule_text += f"• {self.bot.league_label(league)}: {count} матчей\n"
         
         await query.edit_message_text(
             f"{schedule_text}\nВыберите вариант просмотра:",
@@ -86,7 +86,7 @@ class ScheduleHandlers:
                 f"  {i}. {match['teamHome']} vs {match['teamAway']}\n"
                 f"     🏟️ {match['location']}\n"
                 f"     📅 {match['date']} {match['time']}\n"
-                f"     🏆 {match['league']}\n\n"
+                f"     🏆 {self.bot.league_label(match['league'])}\n\n"
             )
         
         keyboard = []
@@ -112,12 +112,12 @@ class ScheduleHandlers:
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
-                f"📋 В лиге '{league_name}' пока нет матчей.",
+                f"📋 В лиге '{self.bot.league_label(league_name)}' пока нет матчей.",
                 reply_markup=reply_markup
             )
             return
         
-        schedule_text = f"🏀 Расписание лиги '{league_name}':\n\n"
+        schedule_text = f"🏀 Расписание лиги '{self.bot.league_label(league_name)}':\n\n"
         for i, match in enumerate(league_matches, 1):
             schedule_text += (
                 f"{i}. {match['teamHome']} vs {match['teamAway']}\n"
@@ -149,7 +149,7 @@ class ScheduleHandlers:
         
         for i, match in enumerate(self.bot.pending_matches, 1):
             schedule_text += (
-                f"{i}. 🏆 {match['league']}\n"
+                f"{i}. 🏆 {self.bot.league_label(match['league'])}\n"
                 f"   🏀 {match['teamHome']} vs {match['teamAway']}\n"
                 f"   🏟️ {match['location']}\n"
                 f"   📅 {match['date']} {match['time']}\n"
@@ -178,13 +178,16 @@ class ScheduleHandlers:
         results_text = "⏳ Результаты, ожидающие применения:\n\n"
         
         for i, result in enumerate(self.bot.pending_results, 1):
-            match = result['match_info']
+            match = result.get('match_info') or {}
+            team_home = match.get('team_a') or match.get('teamHome')
+            team_away = match.get('team_b') or match.get('teamAway')
+            venue = match.get('venue') or match.get('location')
             results_text += (
-                f"{i}. 🏆 {match['league']}\n"
-                f"   🏀 {match['teamHome']} vs {match['teamAway']}\n"
-                f"   📊 Счет: {result['match_info']['score']}\n"
-                f"   🏟️ {match['location']}\n"
-                f"   📅 {match['date']} {match['time']}\n"
+                f"{i}. 🏆 {self.bot.league_label(match.get('league'))}\n"
+                f"   🏀 {team_home} vs {team_away}\n"
+                f"   📊 Счет: {match.get('score')}\n"
+                f"   🏟️ {venue}\n"
+                f"   📅 {match.get('date')} {match.get('time')}\n"
                 f"   👤 {result.get('added_by', 'Неизвестно')}\n\n"
             )
         

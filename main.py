@@ -12,7 +12,7 @@ from bot.handlers.venue_handlers import VenueHandlers
 from bot.handlers.league_handlers import LeagueHandlers
 from bot.handlers.edit_handlers import EditHandlers
 from bot.handlers.stats_handlers import StatsHandlers
-from utils.helpers import convert_to_timestamp, parse_user_info, validate_score_input
+from utils.helpers import parse_user_info
 
 # Настройка логирования
 logging.basicConfig(
@@ -158,6 +158,10 @@ class BotApplication:
         # Обработка применения изменений
         elif data == "apply_changes":
             await self.apply_pending_changes(query, context)
+        elif data == "select_season":
+            await self.main_handlers.show_season_selection(query, context)
+        elif data.startswith("season_"):
+            await self.main_handlers.handle_season_selection(query, context, data.replace("season_", ""))
 
         # Обработка редактирования расписания
         elif data == "edit_schedule_menu":
@@ -246,144 +250,105 @@ class BotApplication:
             await main_handlers.show_main_menu(update, context)
     
     async def apply_pending_changes(self, query, context):
-        """Применить ожидающие изменения и сохранить в GitHub"""
+        """Применить ожидающие изменения в games.json текущего сезона"""
         if not self.bot.pending_matches and not self.bot.pending_results:
             await query.edit_message_text("❌ Нет ожидающих изменений!")
             await self.main_handlers.show_main_menu(query, context, is_query=True)
             return
-        
+
         user = query.from_user
         username = parse_user_info(user)
-        
-        commit_messages = []
-        success_count = 0
-        
-        # Обрабатываем ожидающие матчи
-        if self.bot.pending_matches:
-            # Находим этап "Регулярный сезон" или создаем его
-            regular_season = None
-            for stage in self.bot.schedule_data.get("stages", []):
-                if stage.get("name") == "Регулярный сезон":
-                    regular_season = stage
-                    break
-            
-            if not regular_season:
-                regular_season = {"name": "Регулярный сезон", "games": []}
-                self.bot.schedule_data["stages"].append(regular_season)
-            
-            # Добавляем ожидающие матчи в расписание
-            for match in self.bot.pending_matches:
-                game_data = {
-                    "date": match['date'],
-                    "time": match['time'],
-                    "teamHome": match['teamHome'],
-                    "teamAway": match['teamAway'],
-                    "location": match['location'],
-                    "league": match['league'],
-                    "gameType": match['gameType']
+        added_matches = 0
+        added_results = 0
+
+        for match in self.bot.pending_matches:
+            game_id, _ = self.bot.github_manager.next_game_id(self.bot.games)
+            self.bot.games.append({
+                "id": game_id,
+                "match_info": {
+                    "team_a": match["teamHome"],
+                    "team_b": match["teamAway"],
+                    "date": match["date"],
+                    "time": match["time"],
+                    "venue": match["location"],
+                    "league": match["league"],
+                    "gameType": match.get("gameType") or "regular"
                 }
-                regular_season["games"].append(game_data)
-            
-            # Сортируем игры по дате
-            regular_season["games"].sort(key=lambda x: convert_to_timestamp(x['date'], x['time']))
-            
-            # Сохраняем расписание
-            commit_message = f"Добавлено {len(self.bot.pending_matches)} матчей | Добавил: {username}"
-            success = self.bot.github_manager.save_schedule_to_github(self.bot.schedule_data, commit_message)
-            
-            if success:
-                commit_messages.append(f"📅 Матчи: {len(self.bot.pending_matches)}")
-                success_count += len(self.bot.pending_matches)
-                self.bot.pending_matches = []  # Очищаем очередь
-            else:
-                # Откатываем изменения в случае ошибки
-                for _ in range(len(self.bot.pending_matches)):
-                    if regular_season["games"]:
-                        regular_season["games"].pop()
-        
-        # Обрабатываем ожидающие результаты
-        if self.bot.pending_results:
-            next_game_number = self.bot.github_manager.get_next_game_number()
-            
-            for i, result in enumerate(self.bot.pending_results):
-                game_number = next_game_number + i
-                commit_message = f"Добавлен результат игры {game_number:03d} | Добавил: {username}"
-                
-                success = self.bot.github_manager.save_game_result(
-                    result, 
-                    game_number, 
-                    commit_message
-                )
-                
-                if success:
-                    commit_messages.append(f"🏀 Результат игры {game_number:03d}")
-                    success_count += 1
-                    
-                    # Удаляем матч из расписания после сохранения результата
-                    match_to_remove = result['match_info']
-                    for stage in self.bot.schedule_data.get("stages", []):
-                        stage["games"] = [game for game in stage.get("games", []) 
-                                        if not (game.get("teamHome") == match_to_remove["team_a"] and 
-                                               game.get("teamAway") == match_to_remove["team_b"] and 
-                                               game.get("date") == match_to_remove["date"] and 
-                                               game.get("time") == match_to_remove["time"])]
-            
-            # Сохраняем обновленное расписание (без сыгранных матчей)
-            if self.bot.pending_results:
-                commit_message = f"Удалено {len(self.bot.pending_results)} сыгранных матчей | Обновил: {username}"
-                self.bot.github_manager.save_schedule_to_github(self.bot.schedule_data, commit_message)
-                
-                self.bot.pending_results = []  # Очищаем очередь
-        
-        if success_count > 0:
-            storage_info = " локально" if not self.bot.github_manager.github_available else ""
-            
-            result_text = "✅ Изменения применены и сохранены{}!\n\n📊 Сохранено:\n{}".format(
-                storage_info,
-                "\n".join([f"• {msg}" for msg in commit_messages])
+            })
+            added_matches += 1
+        self.bot.pending_matches = []
+
+        for result in self.bot.pending_results:
+            info = result.get("match_info") or {}
+            updated = self.bot.update_game_fields(
+                {
+                    "id": result.get("game_id") or info.get("id"),
+                    "teamHome": info.get("team_a") or info.get("teamHome"),
+                    "teamAway": info.get("team_b") or info.get("teamAway"),
+                    "date": info.get("date"),
+                    "time": info.get("time")
+                },
+                score=info.get("score")
             )
-            
-            await query.edit_message_text(result_text)
+            if not updated:
+                game_id, _ = self.bot.github_manager.next_game_id(self.bot.games)
+                self.bot.games.append({
+                    "id": game_id,
+                    "match_info": {
+                        "team_a": info.get("team_a") or info.get("teamHome"),
+                        "team_b": info.get("team_b") or info.get("teamAway"),
+                        "score": info.get("score"),
+                        "date": info.get("date"),
+                        "time": info.get("time"),
+                        "venue": info.get("venue") or info.get("location"),
+                        "league": info.get("league"),
+                        "gameType": info.get("gameType") or "regular"
+                    }
+                })
+            added_results += 1
+        self.bot.pending_results = []
+
+        parts = []
+        if added_matches:
+            parts.append(f"матчей: {added_matches}")
+        if added_results:
+            parts.append(f"результатов: {added_results}")
+        commit_message = f"Обновлён games.json ({', '.join(parts)}) | {username}"
+
+        if self.bot.save_games(commit_message):
+            await query.edit_message_text(
+                "✅ Изменения сохранены в games.json сезона "
+                f"{self.bot.season_label()}!\n\n"
+                + "\n".join([f"• {part}" for part in parts])
+            )
         else:
             await query.edit_message_text(
                 "❌ Ошибка при сохранении! Изменения не применены.\n"
                 "Попробуйте позже."
             )
-        
+
         await self.main_handlers.show_main_menu(query, context, is_query=True)
-    
+
     async def delete_match_from_schedule(self, query, context, match_index):
-        """Удалить матч (старый функционал)"""
+        """Удалить матч из games.json"""
         try:
             all_matches = self.bot.get_all_matches()
-            
             if 0 <= match_index < len(all_matches):
                 match_to_delete = all_matches[match_index]
-                
-                # Удаляем матч из структуры данных
-                for stage in self.bot.schedule_data.get("stages", []):
-                    stage["games"] = [game for game in stage.get("games", []) 
-                                    if not (game.get("teamHome") == match_to_delete["teamHome"] and 
-                                           game.get("teamAway") == match_to_delete["teamAway"] and 
-                                           game.get("date") == match_to_delete["date"] and 
-                                           game.get("time") == match_to_delete["time"])]
-                
-                # Сохраняем изменения
-                user = query.from_user
-                username = user.username if user.username else f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
-                
-                commit_message = f"Удален матч: {match_to_delete['teamHome']} vs {match_to_delete['teamAway']} | Удалил: {username}"
-                success = self.bot.github_manager.save_schedule_to_github(self.bot.schedule_data, commit_message)
-                
-                if success:
-                    await query.edit_message_text(f"✅ Матч удален!")
+                if self.bot.delete_game(match_to_delete):
+                    user = query.from_user
+                    username = parse_user_info(user)
+                    commit_message = (
+                        f"Удалён матч: {match_to_delete['teamHome']} vs {match_to_delete['teamAway']} "
+                        f"| {username}"
+                    )
+                    success = self.bot.save_games(commit_message)
+                    await query.edit_message_text("✅ Матч удален!" if success else "❌ Ошибка при сохранении!")
                 else:
-                    await query.edit_message_text("❌ Ошибка при сохранении!")
-                
+                    await query.edit_message_text("❌ Матч не найден в games.json!")
                 await self.main_handlers.show_main_menu_after_query(query, context)
             else:
                 await query.edit_message_text("❌ Матч не найден!")
-                
         except Exception as e:
             logger.error(f"Ошибка при удалении матча: {e}")
             await query.edit_message_text("❌ Произошла ошибка при удалении!")

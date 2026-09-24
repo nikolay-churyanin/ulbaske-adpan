@@ -41,7 +41,7 @@ class StatsHandlers:
             team_b = match_info.get('team_b', '?')
             score = match_info.get('score', '?:?')
             date = match_info.get('date', '?')
-            league = match_info.get('league', 'Неизвестная лига')
+            league = self.bot.league_label(match_info.get('league'))
             
             button_text = f"{i}. {team_a} vs {team_b} ({score}) - {date}"
             game_number = game_info.get('game_number', self.bot.github_manager.extract_game_number(game_info['file_name']))
@@ -89,7 +89,7 @@ class StatsHandlers:
         
         await query.edit_message_text(
             f"📊 Добавление статистики для игры:\n\n"
-            f"🏆 Лига: {league}\n"
+            f"🏆 Лига: {self.bot.league_label(league)}\n"
             f"🏀 {team_a} vs {team_b}\n"
             f"📊 Счет: {score}\n"
             f"📅 Дата: {date}\n"

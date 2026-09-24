@@ -22,15 +22,15 @@ class MatchHandlers:
             return
         
         keyboard = []
-        for league_name in self.bot.leagues.keys():
+        for league_id in self.bot.leagues.keys():
             if action == "add_match":
-                callback_data = f"league_{league_name}"
+                callback_data = f"league_{league_id}"
             else:
-                callback_data = f"schedule_{league_name}"
+                callback_data = f"schedule_{league_id}"
             
-            team_count = len(self.bot.leagues[league_name]["teams"])
+            team_count = len(self.bot.leagues[league_id]["teams"])
             keyboard.append([InlineKeyboardButton(
-                f"{league_name} ({team_count} команд)", 
+                f"{self.bot.league_label(league_id)} ({team_count} команд)",
                 callback_data=callback_data
             )])
         
@@ -76,7 +76,7 @@ class MatchHandlers:
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            f"🏆 Лига: {league_name}\n"
+            f"🏆 Лига: {self.bot.league_label(league_name)}\n"
             f"Выберите {('первую команду' if selection_type == 'team1' else 'вторую команду')}:",
             reply_markup=reply_markup
         )
@@ -104,7 +104,7 @@ class MatchHandlers:
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            f"🏆 Лига: {league_name}\n"
+            f"🏆 Лига: {self.bot.league_label(league_name)}\n"
             f"🏀 Команды: {context.user_data['team1']} vs {context.user_data['team2']}\n\n"
             "🏟️ Выберите спортивный зал:",
             reply_markup=reply_markup
@@ -119,7 +119,7 @@ class MatchHandlers:
         weekend_dates = get_next_weekend_dates()
         
         text = (
-            f"🏆 Лига: {league}\n"
+            f"🏆 Лига: {self.bot.league_label(league)}\n"
             f"🏀 Матч: {context.user_data['team1']} vs {context.user_data['team2']}\n"
             f"🏟️ Зал: {venue}\n\n"
             "📅 Выберите дату матча:"
@@ -153,7 +153,7 @@ class MatchHandlers:
         venue = context.user_data['venue']
         
         # Получаем доступные времена для этого зала и даты
-        available_times = get_available_times_for_venue(venue, selected_date, self.bot.schedule_data)
+        available_times = get_available_times_for_venue(venue, selected_date, self.bot.games)
         
         formatted_date = format_date_for_display(selected_date)
         
@@ -239,12 +239,12 @@ class MatchHandlers:
         
         await query.edit_message_text(
             f"✅ Матч добавлен в очередь!\n\n"
-            f"🏆 Лига: {league}\n"
+            f"🏆 Лига: {self.bot.league_label(league)}\n"
             f"🏀 {team1} vs {team2}\n"
             f"🏟️ {venue}\n"
             f"📅 {formatted_date}\n"
             f"⏰ {selected_time}\n"
-            f"📊 Тип: {game_type}\n"  # Добавим для информации
+            f"📊 Тип: {game_type}\n"
             f"👤 Добавил: {username}\n\n"
             f"⏳ Ожидающих матчей: {len(self.bot.pending_matches)}\n"
             f"Нажмите 'Применить изменения' чтобы сохранить.",
@@ -257,7 +257,7 @@ class MatchHandlers:
             "📅 Введите дату и время матча в формате:\n"
             "ДД.ММ.ГГГГ ЧЧ:ММ\n\n"
             "Например: 15.12.2024 18:30\n\n"
-            "Или в формате как в schedule.json:\n"
+            "Или в формате как в games.json:\n"
             "ГГГГ-ММ-ДД ЧЧ:ММ\n"
             "Например: 2025-10-11 12:00"
         )
@@ -338,12 +338,12 @@ class MatchHandlers:
             
             await update.message.reply_text(
                 f"✅ Матч добавлен в очередь!\n\n"
-                f"🏆 Лига: {league}\n"
+                f"🏆 Лига: {self.bot.league_label(league)}\n"
                 f"🏀 {team1} vs {team2}\n"
                 f"🏟️ {venue}\n"
                 f"📅 {formatted_date}\n"
                 f"⏰ {selected_time}\n"
-                f"📊 Тип: {game_type}\n"  # Добавим для информации
+                f"📊 Тип: {game_type}\n"
                 f"👤 Добавил: {username}\n\n"
                 f"⏳ Ожидающих матчей: {len(self.bot.pending_matches)}\n"
                 f"Нажмите 'Применить изменения' чтобы сохранить.",
@@ -374,7 +374,7 @@ class MatchHandlers:
                 time_str = match_date.strftime("%H:%M")
             except ValueError:
                 try:
-                    # Формат ГГГГ-ММ-ДД ЧЧ:ММ (как в schedule.json)
+                    # Формат ГГГГ-ММ-ДД ЧЧ:ММ (как в games.json)
                     match_date = datetime.strptime(date_text, "%Y-%m-%d %H:%M")
                     date_str = match_date.strftime("%Y-%m-%d")
                     time_str = match_date.strftime("%H:%M")
@@ -399,7 +399,7 @@ class MatchHandlers:
             # ОПРЕДЕЛЯЕМ ТИП ИГРЫ
             game_type = self.bot.determine_game_type(league, team1, team2, date_str)
             
-            # Создание записи о матче в формате schedule.json
+            # Создание записи о матче в формате games.json
             match_data = {
                 'date': date_str,
                 'time': time_str,
@@ -428,7 +428,7 @@ class MatchHandlers:
             
             await update.message.reply_text(
                 f"✅ Матч добавлен в очередь!\n\n"
-                f"🏆 Лига: {match_data['league']}\n"
+                f"🏆 Лига: {self.bot.league_label(match_data['league'])}\n"
                 f"🏀 {match_data['teamHome']} vs {match_data['teamAway']}\n"
                 f"🏟️ {match_data['location']}\n"
                 f"📅 {match_data['date']} {match_data['time']}\n"

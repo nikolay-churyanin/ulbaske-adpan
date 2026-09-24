@@ -1,13 +1,9 @@
 import logging
 import time
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
-from datetime import datetime
-from config import *
-from github_manager import GitHubManager
-from utils.helpers import convert_to_timestamp, parse_user_info
+from utils.helpers import convert_to_timestamp, game_has_score
 
 logger = logging.getLogger(__name__)
+
 
 class BasketballChampionshipBot:
     def __init__(self, token, github_manager):
@@ -15,382 +11,255 @@ class BasketballChampionshipBot:
         self.github_manager = github_manager
         self.leagues = {}
         self.venues = []
-        self.schedule_data = {"season": "2025-2026", "stages": []}
+        self.games = []
         self.leagues_config = {}
         self.pending_matches = []
         self.pending_results = []
-        self.temp_files = []
-
-        # Кэш для оптимизации поиска игр
         self._games_cache = None
         self._games_cache_timestamp = 0
         self._games_without_stats_cache = {}
         self._games_without_stats_cache_timestamp = {}
-        
-        # Кэш для номеров игр со статистикой
         self._games_with_stats_cache = None
         self._games_with_stats_cache_timestamp = 0
-    
-    def load_data_from_github(self):
-        """Загрузка всех данных из GitHub"""
+
+    def load_data_from_github(self, season_id=None):
         try:
+            catalog = self.github_manager.load_catalog()
+            resolved = self.github_manager.resolve_season_id(season_id or self.github_manager.season_id)
+            if not resolved:
+                logger.error("Не найден ни один сезон в data/seasons.json")
+                return False
+
+            self.github_manager.set_season(resolved)
+            self.leagues_config = self.github_manager.get_leagues_config()
             teams_data = self.github_manager.get_teams_data()
             self.leagues = self.organize_teams_by_league(teams_data)
-            
-            self.venues = self.github_manager.get_venues_data()
-            self.schedule_data = self.github_manager.get_schedule_data()
-            
-            # Загружаем конфигурацию лиг
-            self.leagues_config = self.github_manager.get_leagues_config()
-            
-            logger.info("Данные успешно загружены")
+            self.venues = self.github_manager.get_venues_data() or []
+            self.games = self.github_manager.get_games()
+            self._invalidate_caches()
+            logger.info("Данные сезона %s загружены", resolved)
             return True
-            
         except Exception as e:
             logger.error(f"Ошибка при загрузке данных: {e}")
             return False
-    
+
+    def season_label(self):
+        meta = self.github_manager.season_meta()
+        label = meta.get("label") or self.github_manager.season_id
+        if meta.get("archived"):
+            return f"{label} (архив)"
+        return label
+
+    def league_label(self, league_id):
+        config = (self.leagues_config or {}).get(league_id) or {}
+        if config.get("name"):
+            return config["name"]
+        league = self.leagues.get(league_id) or {}
+        return league.get("name") or league_id
+
     def organize_teams_by_league(self, teams_data):
-        """Организовать команды по лигам"""
         leagues = {}
-        for team in teams_data:
-            league_name = team.get('league', 'Без лиги')
-            if league_name not in leagues:
-                leagues[league_name] = {
+        for league_id, config in (self.leagues_config or {}).items():
+            leagues[league_id] = {
+                "id": league_id,
+                "name": config.get("name") or league_id,
+                "teams": [],
+                "full_data": []
+            }
+
+        for team in teams_data or []:
+            league_id = team.get("league")
+            if not league_id:
+                continue
+            if league_id not in leagues:
+                leagues[league_id] = {
+                    "id": league_id,
+                    "name": league_id,
                     "teams": [],
                     "full_data": []
                 }
-            leagues[league_name]["teams"].append(team['name'])
-            leagues[league_name]["full_data"].append(team)
+            leagues[league_id]["teams"].append(team["name"])
+            leagues[league_id]["full_data"].append(team)
         return leagues
-    
+
     def determine_game_type(self, league, team_home, team_away, date):
-        """
-        Определить тип игры (regular/playoff) на основе количества сыгранных матчей
-        в регулярном сезоне для данной лиги
-        """
         try:
-            # Загружаем конфигурацию лиг
-            leagues_config = self.github_manager.get_leagues_config()
-            
-            # Находим ID лиги по её названию
-            league_id = None
-            for lid, config in leagues_config.items():
-                if lid == league:
-                    league_id = lid
-                    break
-            
-            if not league_id:
-                logger.warning(f"Лига '{league}' не найдена в конфигурации, используется regular")
-                return "regular"
-            
-            # Получаем количество кругов регулярного сезона
-            regular_rounds = leagues_config[league_id].get('regularSeasonRounds', 1)
-            
-            # Получаем все команды лиги
-            teams_in_league = self.leagues.get(league, {}).get('teams', [])
+            config = (self.leagues_config or {}).get(league) or {}
+            regular_rounds = config.get("regularSeasonRounds", 1)
+            teams_in_league = self.leagues.get(league, {}).get("teams", [])
             num_teams = len(teams_in_league)
-            
             if num_teams < 2:
                 return "regular"
-            
-            # Количество матчей в регулярном сезоне для каждой команды
-            # В двухкруговом турнире каждая команда играет с каждой дважды
-            matches_per_team_in_regular = (num_teams - 1) * regular_rounds
-            
-            # Получаем ВСЕ сыгранные матчи (по наличию файлов в games/)
-            all_played_games = self.get_all_games_cached()
-            
-            # Словарь для подсчета сыгранных матчей каждой команды
-            team_played_matches = {team: 0 for team in teams_in_league}
-            
-            for game_info in all_played_games:
-                game_data = game_info.get('data', {})
-                match_info = game_data.get('match_info', {})
-                
-                # Получаем лигу из данных игры
-                game_league = match_info.get('league') or match_info.get('competition', '')
-                
-                # Проверяем, относится ли игра к нужной лиге
-                if game_league == league:
-                    team_a = match_info.get('team_a', '')
-                    team_b = match_info.get('team_b', '')
-                    
-                    if team_a in team_played_matches:
-                        team_played_matches[team_a] += 1
-                    if team_b in team_played_matches:
-                        team_played_matches[team_b] += 1
-            
-            # Логируем статистику для отладки
-            logger.info(f"Статистика сыгранных матчей для лиги '{league}' (определено по файлам в games/):")
-            for team, played in team_played_matches.items():
-                logger.info(f"  {team}: {played}/{matches_per_team_in_regular}")
-            
-            # Проверяем, завершен ли регулярный сезон для КАЖДОЙ команды
-            regular_season_finished = True
-            teams_not_finished = []
-            
-            for team, played in team_played_matches.items():
-                if played < matches_per_team_in_regular:
-                    regular_season_finished = False
-                    teams_not_finished.append(f"{team} ({played}/{matches_per_team_in_regular})")
-            
-            if regular_season_finished:
-                logger.info(f"✅ Регулярный сезон для лиги '{league}' завершен. Матч определяется как playoff")
+
+            matches_per_team = (num_teams - 1) * regular_rounds
+            team_played = {team: 0 for team in teams_in_league}
+
+            for game in self.games:
+                info = game.get("match_info") or {}
+                if info.get("league") != league or not game_has_score(info):
+                    continue
+                team_a = info.get("team_a", "")
+                team_b = info.get("team_b", "")
+                if team_a in team_played:
+                    team_played[team_a] += 1
+                if team_b in team_played:
+                    team_played[team_b] += 1
+
+            if all(played >= matches_per_team for played in team_played.values()):
                 return "playoff"
-            else:
-                logger.info(f"❌ Регулярный сезон для лиги '{league}' не завершен. Не сыграли: {', '.join(teams_not_finished)}")
-                return "regular"
-                
+            return "regular"
         except Exception as e:
             logger.error(f"Ошибка при определении gameType для лиги '{league}': {e}")
             return "regular"
 
     def get_all_matches(self):
-        """Получить все матчи из расписания в плоском формате"""
-        all_matches = []
-        for stage in self.schedule_data.get("stages", []):
-            for game in stage.get("games", []):
-                league = self.find_league_for_teams(game.get("teamHome"), game.get("teamAway"))
-                match_info = {
-                    'stage': stage.get('name', 'Неизвестный этап'),
-                    'league': league,
-                    'teamHome': game.get('teamHome'),
-                    'teamAway': game.get('teamAway'),
-                    'date': game.get('date'),
-                    'time': game.get('time'),
-                    'location': game.get('location'),
-                    'datetime': f"{game.get('date')} {game.get('time')}",
-                    'timestamp': convert_to_timestamp(game.get('date'), game.get('time'))
-                }
-                all_matches.append(match_info)
-        return sorted(all_matches, key=lambda x: x['timestamp'])
-    
-    def find_league_for_teams(self, team1, team2):
-        """Найти лигу для команд"""
-        for league_name, league_data in self.leagues.items():
-            if team1 in league_data["teams"] or team2 in league_data["teams"]:
-                return league_name
-        return "Неизвестная лига"
+        """Несыгранные матчи текущего сезона (без счёта)."""
+        matches = []
+        for game in self.games:
+            info = game.get("match_info") or {}
+            if game_has_score(info):
+                continue
+            date = info.get("date")
+            time_str = info.get("time") or "12:00"
+            league = info.get("league")
+            matches.append({
+                "id": game.get("id"),
+                "stage": "Плей-офф" if info.get("gameType") == "playoff" else "Регулярный сезон",
+                "league": league,
+                "teamHome": info.get("team_a"),
+                "teamAway": info.get("team_b"),
+                "date": date,
+                "time": time_str,
+                "location": info.get("venue") or info.get("location"),
+                "datetime": f"{date} {time_str}",
+                "timestamp": convert_to_timestamp(date, time_str),
+                "gameType": info.get("gameType") or "regular"
+            })
+        return sorted(matches, key=lambda item: item["timestamp"])
 
-    def get_games_without_stats(self, league=None):
-        """Получить игры без статистики с кэшированием"""
-        cache_key = league or 'all'
-        
-        # Проверяем кэш (актуален в течение 30 секунд)
-        current_time = time.time()
-        if (cache_key in self._games_without_stats_cache and 
-            current_time - self._games_without_stats_cache_timestamp.get(cache_key, 0) < 30):
-            return self._games_without_stats_cache[cache_key]
-        
-        # Получаем игры со статистикой из кэша
-        games_with_stats = self.get_games_with_statistics()
-        
-        # Получаем все игры из кэша
-        all_games = self.get_all_games_cached()
-        games_without_stats = []
-        
-        for game in all_games:
-            game_number = self.github_manager.extract_game_number(game['file_name'])
-            if game_number not in games_with_stats:
-                # Проверяем лигу если указана
-                if league:
-                    game_league = self.github_manager.get_game_league(game.get('data', {}))
-                    if game_league != league:
-                        continue
-                
-                # Добавляем номер игры в объект для быстрого доступа
-                game['game_number'] = game_number
-                games_without_stats.append(game)
-        
-        # Сортируем по номеру игры (по убыванию - самые новые первые)
-        games_without_stats.sort(key=lambda x: x['game_number'], reverse=True)
-        
-        # Сохраняем в кэш
-        self._games_without_stats_cache[cache_key] = games_without_stats
-        self._games_without_stats_cache_timestamp[cache_key] = current_time
-        
-        return games_without_stats[:5]  # Возвращаем только 5 последних игр
-    
+    def find_game_index(self, game_id=None, team_home=None, team_away=None, date=None, time_str=None):
+        for index, game in enumerate(self.games):
+            if game_id and game.get("id") == game_id:
+                return index
+            info = game.get("match_info") or {}
+            if (
+                team_home and team_away and date and time_str and
+                info.get("team_a") == team_home and
+                info.get("team_b") == team_away and
+                info.get("date") == date and
+                info.get("time") == time_str
+            ):
+                return index
+        return None
+
+    def update_game_fields(self, match, **fields):
+        index = self.find_game_index(
+            game_id=match.get("id"),
+            team_home=match.get("teamHome"),
+            team_away=match.get("teamAway"),
+            date=match.get("date"),
+            time_str=match.get("time")
+        )
+        if index is None:
+            return False
+        info = self.games[index].setdefault("match_info", {})
+        if "location" in fields and fields["location"] is not None:
+            info["venue"] = fields["location"]
+        if "date" in fields and fields["date"] is not None:
+            info["date"] = fields["date"]
+        if "time" in fields and fields["time"] is not None:
+            info["time"] = fields["time"]
+        if "score" in fields and fields["score"] is not None:
+            info["score"] = fields["score"]
+        return True
+
+    def delete_game(self, match):
+        index = self.find_game_index(
+            game_id=match.get("id"),
+            team_home=match.get("teamHome"),
+            team_away=match.get("teamAway"),
+            date=match.get("date"),
+            time_str=match.get("time")
+        )
+        if index is None:
+            return False
+        self.games.pop(index)
+        return True
+
+    def save_games(self, commit_message):
+        success = self.github_manager.save_games(self.games, commit_message)
+        if success:
+            self._invalidate_caches()
+        return success
+
     def get_all_games_cached(self):
-        """Получить все игры с кэшированием"""
         current_time = time.time()
-        
-        # Проверяем кэш (актуален в течение 60 секунд)
-        if (self._games_cache is not None and 
-            current_time - self._games_cache_timestamp < 60):
+        if self._games_cache is not None and current_time - self._games_cache_timestamp < 60:
             return self._games_cache
-        
         games = self.github_manager.get_all_games()
-        
-        # Сохраняем в кэш
         self._games_cache = games
         self._games_cache_timestamp = current_time
-        
         return games
-    
+
     def get_games_with_statistics(self):
-        """Получить игры со статистикой с кэшированием"""
         current_time = time.time()
-        
-        # Проверяем кэш (актуален в течение 60 секунд)
-        if (self._games_with_stats_cache is not None and 
-            current_time - self._games_with_stats_cache_timestamp < 60):
+        if (
+            self._games_with_stats_cache is not None and
+            current_time - self._games_with_stats_cache_timestamp < 60
+        ):
             return self._games_with_stats_cache
-        
-        # Загружаем игры со статистикой
         games_with_stats = self.github_manager.get_games_with_statistics()
-        
-        # Сохраняем в кэш
         self._games_with_stats_cache = games_with_stats
         self._games_with_stats_cache_timestamp = current_time
-        
         return games_with_stats
-    
-    def get_game_by_number_cached(self, game_number):
-        """Получить игру по номеру с использованием кэша"""
-        # Проверяем в кэше игр без статистики
-        for cache_key in self._games_without_stats_cache:
-            if cache_key in self._games_without_stats_cache:
-                for game_info in self._games_without_stats_cache[cache_key]:
-                    if game_info.get('game_number') == game_number:
-                        return game_info
-        
-        # Если не нашли в кэше, ищем во всех играх
-        all_games = self.get_all_games_cached()
-        for game_info in all_games:
-            if self.github_manager.extract_game_number(game_info['file_name']) == game_number:
-                # Добавляем номер игры для быстрого доступа
-                game_info['game_number'] = game_number
-                return game_info
-        
-        # Если не нашли, загружаем напрямую
-        filename = f"game_{game_number:03d}.json"
-        game_data = self.github_manager._load_game_data(filename)
-        if game_data:
-            return {
-                'file_name': filename,
-                'data': game_data,
-                'game_number': game_number,
-                'path': f"{GAMES_DIR_PATH}/{filename}"
-            }
-        return None
-    
-    def update_games_cache_after_stats_added(self, game_number):
-        """Обновить кэш после добавления статистики"""
-        # Обновляем кэш игр со статистикой
-        if self._games_with_stats_cache is not None:
-            self._games_with_stats_cache.add(game_number)
-        
-        # Обновляем кэш игр без статистики
-        for key in list(self._games_without_stats_cache.keys()):
-            if key in self._games_without_stats_cache:
-                self._games_without_stats_cache[key] = [
-                    game for game in self._games_without_stats_cache[key] 
-                    if game.get('game_number') != game_number
-                ]
-
-    def get_games_without_stats_optimized(self, league=None):
-        """Оптимизированное получение игр без статистики"""
-        cache_key = league or 'all'
-        current_time = time.time()
-        
-        # Проверяем кэш (актуален в течение 30 секунд)
-        if (cache_key in self._games_without_stats_cache and 
-            current_time - self._games_without_stats_cache_timestamp.get(cache_key, 0) < 30):
-            cached_games = self._games_without_stats_cache[cache_key]
-            # Убедимся, что у всех игр есть данные
-            for game_info in cached_games:
-                if 'data' not in game_info:
-                    game_data = self.github_manager._load_game_data(game_info['file_name'])
-                    if game_data:
-                        game_info['data'] = game_data
-            return cached_games
-        
-        # Используем оптимизированный метод
-        games_without_stats = self.github_manager.get_games_without_statistics_optimized(league)
-        
-        # Дозагружаем данные для отображения
-        for game_info in games_without_stats:
-            if 'data' not in game_info:
-                game_data = self.github_manager._load_game_data(game_info['file_name'])
-                if game_data:
-                    game_info['data'] = game_data
-        
-        # Сохраняем в кэш
-        self._games_without_stats_cache[cache_key] = games_without_stats
-        self._games_without_stats_cache_timestamp[cache_key] = current_time
-        
-        return games_without_stats
-
-    def _load_game_data(self, filename):
-        """Загрузить данные конкретной игры"""
-        try:
-            if not self.github_available:
-                file_path = os.path.join(GAMES_DIR_PATH, filename)
-                if os.path.exists(file_path):
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        return json.load(f)
-                return None
-            
-            file_path = f"{GAMES_DIR_PATH}/{filename}"
-            file_content = self.repo.get_contents(file_path)
-            content = base64.b64decode(file_content.content).decode('utf-8')
-            return json.loads(content)
-        except:
-            return None
-
-    def has_games_without_stats(self, league=None):
-        """Быстрая проверка наличия игр без статистики"""
-        try:
-            # Получаем игры со статистикой из кэша
-            games_with_stats = self.get_games_with_statistics()
-            
-            # Получаем все номера игр из папки games
-            all_game_numbers = set()
-            for filename in os.listdir(GAMES_DIR_PATH) if os.path.exists(GAMES_DIR_PATH) else []:
-                if filename.startswith("game_") and filename.endswith(".json"):
-                    game_number = self.github_manager.extract_game_number(filename)
-                    if game_number:
-                        all_game_numbers.add(game_number)
-            
-            # Быстро проверяем, есть ли игры без статистики
-            for game_number in all_game_numbers:
-                if game_number not in games_with_stats:
-                    return True
-            return False
-        except:
-            return False
 
     def get_all_games_without_stats(self):
-        """Получить все игры без статистики (без фильтрации по лигам)"""
-        cache_key = 'all_games_no_stats'
-        
-        # Проверяем кэш (актуален в течение 30 секунд)
         current_time = time.time()
-        if (cache_key in self._games_without_stats_cache and 
-            current_time - self._games_without_stats_cache_timestamp.get(cache_key, 0) < 30):
+        cache_key = "all_games_no_stats"
+        if (
+            cache_key in self._games_without_stats_cache and
+            current_time - self._games_without_stats_cache_timestamp.get(cache_key, 0) < 30
+        ):
             return self._games_without_stats_cache[cache_key]
-        
-        # Получаем игры со статистикой из кэша
+
         games_with_stats = self.get_games_with_statistics()
-        
-        # Получаем все игры из кэша
-        all_games = self.get_all_games_cached()
         games_without_stats = []
-        
-        for game in all_games:
-            game_number = self.github_manager.extract_game_number(game['file_name'])
-            if game_number not in games_with_stats:
-                # Добавляем номер игры в объект для быстрого доступа
-                game['game_number'] = game_number
+        for game in self.get_all_games_cached():
+            info = (game.get("data") or {}).get("match_info") or {}
+            if not game_has_score(info):
+                continue
+            game_number = game.get("game_number") or self.github_manager.extract_game_number(game.get("id"))
+            if game_number and game_number not in games_with_stats:
+                game["game_number"] = game_number
                 games_without_stats.append(game)
-        
-        # Сортируем по номеру игры (по убыванию - самые новые первые)
-        games_without_stats.sort(key=lambda x: x['game_number'], reverse=True)
-        
-        # Сохраняем в кэш
-        self._games_without_stats_cache[cache_key] = games_without_stats
+
+        games_without_stats.sort(key=lambda item: item.get("game_number") or 0, reverse=True)
+        result = games_without_stats[:10]
+        self._games_without_stats_cache[cache_key] = result
         self._games_without_stats_cache_timestamp[cache_key] = current_time
-        
-        return games_without_stats[:10]  # Возвращаем только 10 последних игр
+        return result
+
+    def get_game_by_number_cached(self, game_number):
+        for game in self.get_all_games_cached():
+            number = game.get("game_number") or self.github_manager.extract_game_number(game.get("id"))
+            if number == game_number:
+                game["game_number"] = number
+                return game
+        return None
+
+    def update_games_cache_after_stats_added(self, game_number):
+        if self._games_with_stats_cache is not None:
+            self._games_with_stats_cache.add(game_number)
+        for key in list(self._games_without_stats_cache.keys()):
+            self._games_without_stats_cache[key] = [
+                game for game in self._games_without_stats_cache[key]
+                if game.get("game_number") != game_number
+            ]
+
+    def _invalidate_caches(self):
+        self._games_cache = None
+        self._games_cache_timestamp = 0
+        self._games_without_stats_cache = {}
+        self._games_without_stats_cache_timestamp = {}
+        self._games_with_stats_cache = None
+        self._games_with_stats_cache_timestamp = 0

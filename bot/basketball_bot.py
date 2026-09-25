@@ -82,16 +82,35 @@ class BasketballChampionshipBot:
             leagues[league_id]["full_data"].append(team)
         return leagues
 
+    def expected_regular_games_per_team(self, league):
+        config = (self.leagues_config or {}).get(league) or {}
+        teams_in_league = self.leagues.get(league, {}).get("teams", [])
+        num_teams = len(teams_in_league)
+        if num_teams < 2:
+            return 0
+
+        kind = config.get("format") or "round"
+        settings = config.get(kind) or {}
+
+        if kind == "split-groups":
+            stage1_rounds = int(settings.get("stage1Rounds") or 1)
+            group_rounds = int(settings.get("groupRounds") or 1)
+            groups = settings.get("groups") or []
+            group_size = int(groups[0].get("size") or 0) if groups else 0
+            extra = (group_size - 1) * group_rounds if group_size >= 2 else 0
+            return (num_teams - 1) * stage1_rounds + extra
+
+        regular_rounds = int(settings.get("numberOfRounds") or 1)
+        return (num_teams - 1) * regular_rounds
+
     def determine_game_type(self, league, team_home, team_away, date):
         try:
-            config = (self.leagues_config or {}).get(league) or {}
-            regular_rounds = config.get("regularSeasonRounds", 1)
             teams_in_league = self.leagues.get(league, {}).get("teams", [])
             num_teams = len(teams_in_league)
             if num_teams < 2:
                 return "regular"
 
-            matches_per_team = (num_teams - 1) * regular_rounds
+            matches_per_team = self.expected_regular_games_per_team(league)
             team_played = {team: 0 for team in teams_in_league}
 
             for game in self.games:
@@ -105,7 +124,7 @@ class BasketballChampionshipBot:
                 if team_b in team_played:
                     team_played[team_b] += 1
 
-            if all(played >= matches_per_team for played in team_played.values()):
+            if matches_per_team and all(played >= matches_per_team for played in team_played.values()):
                 return "playoff"
             return "regular"
         except Exception as e:

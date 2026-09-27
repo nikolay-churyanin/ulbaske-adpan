@@ -115,7 +115,8 @@ class GitHubManager:
 
     def get_games_with_statistics(self):
         games_with_stats = set()
-        result_dir = self._path("result")
+        result_dir = self._path("result").rstrip("/")
+        prefix = result_dir + "/"
         try:
             if not self.github_available:
                 if not os.path.exists(result_dir):
@@ -126,15 +127,40 @@ class GitHubManager:
                         games_with_stats.add(number)
                 return games_with_stats
 
+            games_with_stats = self._stats_from_git_tree(prefix)
+            if games_with_stats is not None:
+                return games_with_stats
+
             contents = self.repo.get_contents(result_dir)
             items = contents if isinstance(contents, list) else [contents]
+            found = set()
             for item in items:
                 number = self.extract_game_number(item.name)
                 if number:
-                    games_with_stats.add(number)
+                    found.add(number)
+            return found
         except Exception as e:
             logger.info(f"Папка result недоступна: {e}")
         return games_with_stats
+
+    def _stats_from_git_tree(self, prefix):
+        try:
+            branch = self.repo.get_branch(self.repo.default_branch)
+            tree = self.repo.get_git_tree(branch.commit.sha, recursive=True)
+            found = set()
+            for element in tree.tree:
+                if element.type != "blob":
+                    continue
+                path = element.path or ""
+                if not path.startswith(prefix):
+                    continue
+                number = self.extract_game_number(path.rsplit("/", 1)[-1])
+                if number:
+                    found.add(number)
+            return found
+        except Exception as e:
+            logger.info(f"Не удалось прочитать git tree для статистики: {e}")
+            return None
 
     def save_statistics_image(self, image_data, game_number, commit_message):
         filename = f"game_{game_number:03d}.jpg"

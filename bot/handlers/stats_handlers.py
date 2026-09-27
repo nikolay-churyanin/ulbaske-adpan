@@ -12,6 +12,10 @@ class StatsHandlers:
     async def show_stats_menu(self, query, context):
         """Показать меню управления статистикой"""
         # Получаем все игры без статистики
+        try:
+            await query.edit_message_text("📊 Загрузка игр без статистики...")
+        except Exception:
+            pass
         games_without_stats = self.bot.get_all_games_without_stats()
         
         if not games_without_stats:

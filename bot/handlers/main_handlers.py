@@ -47,6 +47,7 @@ class MainHandlers:
         
         if pending_matches_count > 0 or pending_results_count > 0:
             keyboard.insert(3, [InlineKeyboardButton("✅ Применить изменения", callback_data="apply_changes")])
+            keyboard.insert(4, [InlineKeyboardButton("🗑️ Сбросить очередь", callback_data="clear_pending")])
         
         keyboard.append([InlineKeyboardButton("📆 Выбрать сезон", callback_data="select_season")])
         keyboard.append([InlineKeyboardButton("🔄 Обновить данные", callback_data="refresh_data")])
@@ -105,6 +106,19 @@ class MainHandlers:
             await query.edit_message_text(status_msg)
         else:
             await query.edit_message_text("❌ Не удалось обновить данные!")
+        await self.show_main_menu(query, context, is_query=True)
+
+    async def handle_clear_pending(self, query, context):
+        had_pending = bool(self.bot.pending_matches or self.bot.pending_results)
+        self.bot.clear_pending_queue()
+        self._clear_user_states(context)
+        if had_pending:
+            await query.edit_message_text(
+                "✅ Очередь сброшена.\n"
+                "Неприменённые матчи и результаты удалены. Можно вносить заново."
+            )
+        else:
+            await query.edit_message_text("Очередь и так пустая.")
         await self.show_main_menu(query, context, is_query=True)
 
     async def show_season_selection(self, query, context):

@@ -203,7 +203,42 @@ class BasketballChampionshipBot:
         if index is None:
             return False
         self.games.pop(index)
+        self._invalidate_caches()
         return True
+
+    def pending_result_game_ids(self):
+        ids = set()
+        for result in self.pending_results:
+            info = result.get("match_info") or {}
+            game_id = result.get("game_id") or info.get("id")
+            if game_id:
+                ids.add(game_id)
+        return ids
+
+    def add_pending_result(self, result_data):
+        info = result_data.get("match_info") or {}
+        game_id = result_data.get("game_id") or info.get("id")
+        kept = []
+        for existing in self.pending_results:
+            existing_info = existing.get("match_info") or {}
+            existing_id = existing.get("game_id") or existing_info.get("id")
+            if game_id and existing_id == game_id:
+                continue
+            if (
+                not game_id
+                and existing_info.get("team_a") == info.get("team_a")
+                and existing_info.get("team_b") == info.get("team_b")
+                and existing_info.get("date") == info.get("date")
+                and existing_info.get("time") == info.get("time")
+            ):
+                continue
+            kept.append(existing)
+        kept.append(result_data)
+        self.pending_results = kept
+
+    def clear_pending_queue(self):
+        self.pending_matches = []
+        self.pending_results = []
 
     def save_games(self, commit_message):
         success = self.github_manager.save_games(self.games, commit_message)
@@ -212,34 +247,32 @@ class BasketballChampionshipBot:
         return success
 
     def get_all_games_cached(self):
-        current_time = time.time()
-        if self._games_cache is not None and current_time - self._games_cache_timestamp < 60:
+        if self._games_cache is not None:
             return self._games_cache
-        games = self.github_manager.get_all_games()
-        self._games_cache = games
-        self._games_cache_timestamp = current_time
-        return games
+        wrapped = []
+        for game in self.games:
+            game_id = game.get("id") or ""
+            wrapped.append({
+                "file_name": f"{game_id}.json" if game_id else "game.json",
+                "game_number": self.github_manager.extract_game_number(game_id),
+                "id": game_id,
+                "data": game,
+                "path": self.github_manager._path("games.json") if self.github_manager.season_id else ""
+            })
+        self._games_cache = wrapped
+        self._games_cache_timestamp = time.time()
+        return wrapped
 
     def get_games_with_statistics(self):
-        current_time = time.time()
-        if (
-            self._games_with_stats_cache is not None and
-            current_time - self._games_with_stats_cache_timestamp < 60
-        ):
+        if self._games_with_stats_cache is not None:
             return self._games_with_stats_cache
-        games_with_stats = self.github_manager.get_games_with_statistics()
-        self._games_with_stats_cache = games_with_stats
-        self._games_with_stats_cache_timestamp = current_time
-        return games_with_stats
+        self._games_with_stats_cache = self.github_manager.get_games_with_statistics()
+        self._games_with_stats_cache_timestamp = time.time()
+        return self._games_with_stats_cache
 
     def get_all_games_without_stats(self):
-        current_time = time.time()
-        cache_key = "all_games_no_stats"
-        if (
-            cache_key in self._games_without_stats_cache and
-            current_time - self._games_without_stats_cache_timestamp.get(cache_key, 0) < 30
-        ):
-            return self._games_without_stats_cache[cache_key]
+        if "all_games_no_stats" in self._games_without_stats_cache:
+            return self._games_without_stats_cache["all_games_no_stats"]
 
         games_with_stats = self.get_games_with_statistics()
         games_without_stats = []
@@ -254,8 +287,7 @@ class BasketballChampionshipBot:
 
         games_without_stats.sort(key=lambda item: item.get("game_number") or 0, reverse=True)
         result = games_without_stats[:10]
-        self._games_without_stats_cache[cache_key] = result
-        self._games_without_stats_cache_timestamp[cache_key] = current_time
+        self._games_without_stats_cache["all_games_no_stats"] = result
         return result
 
     def get_game_by_number_cached(self, game_number):

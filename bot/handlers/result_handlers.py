@@ -35,16 +35,31 @@ class ResultHandlers:
             match_time = convert_to_timestamp(match['date'], match['time'])
             if match_time < current_time.timestamp():
                 available_matches.append(match)
+
+        pending_ids = self.bot.pending_result_game_ids()
+        if pending_ids:
+            available_matches = [
+                match for match in available_matches
+                if match.get("id") not in pending_ids
+            ]
         
         if not available_matches:
-            keyboard = [
-                [InlineKeyboardButton("➕ Результат без анонса", callback_data="add_result_new_match")],
-                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
-            ]
+            keyboard = []
+            if self.bot.pending_results:
+                keyboard.append([InlineKeyboardButton("✅ Применить изменения", callback_data="apply_changes")])
+                keyboard.append([InlineKeyboardButton("🗑️ Сбросить очередь", callback_data="clear_pending")])
+            keyboard.append([InlineKeyboardButton("➕ Результат без анонса", callback_data="add_result_new_match")])
+            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
             reply_markup = InlineKeyboardMarkup(keyboard)
+            pending_note = ""
+            if self.bot.pending_results:
+                pending_note = (
+                    f"\nВ очереди уже {len(self.bot.pending_results)} "
+                    "результат(ов). Примените или сбросьте очередь."
+                )
             await query.edit_message_text(
-                "❌ Нет завершенных матчей без счёта.\n"
-                "Можно добавить результат прошедшей игры сразу в games.json.",
+                "❌ Нет завершенных матчей без счёта." + pending_note +
+                "\nМожно добавить результат прошедшей игры сразу в games.json.",
                 reply_markup=reply_markup
             )
             return
@@ -137,7 +152,7 @@ class ResultHandlers:
             }
             
             # Добавляем в ожидающие результаты
-            self.bot.pending_results.append(result_data)
+            self.bot.add_pending_result(result_data)
             
             # Очистка временных данных
             context.user_data.pop('waiting_for_score', None)
@@ -148,6 +163,7 @@ class ResultHandlers:
             keyboard = [
                 [InlineKeyboardButton("✅ Применить изменения", callback_data="apply_changes")],
                 [InlineKeyboardButton("🏀 Добавить еще результат", callback_data="add_result")],
+                [InlineKeyboardButton("🗑️ Сбросить очередь", callback_data="clear_pending")],
                 [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -431,7 +447,7 @@ class ResultHandlers:
             }
             
             # Добавляем в ожидающие результаты
-            self.bot.pending_results.append(result_data)
+            self.bot.add_pending_result(result_data)
             
             # Очистка временных данных
             from bot.handlers.main_handlers import MainHandlers
@@ -442,6 +458,7 @@ class ResultHandlers:
             keyboard = [
                 [InlineKeyboardButton("✅ Применить изменения", callback_data="apply_changes")],
                 [InlineKeyboardButton("🏀 Добавить еще результат", callback_data="add_result")],
+                [InlineKeyboardButton("🗑️ Сбросить очередь", callback_data="clear_pending")],
                 [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)

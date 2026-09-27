@@ -44,8 +44,9 @@ class BotApplication:
         from bot.handlers.main_handlers import MainHandlers
         main_handlers = MainHandlers(self.bot)
         main_handlers._clear_user_states(context)
+        self.bot.clear_pending_queue()
         
-        await update.message.reply_text("✅ Все состояния сброшены!")
+        await update.message.reply_text("✅ Состояния и очередь неприменённых изменений сброшены!")
         await main_handlers.show_main_menu(update, context)
 
     def setup_handlers(self):
@@ -158,6 +159,8 @@ class BotApplication:
         # Обработка применения изменений
         elif data == "apply_changes":
             await self.apply_pending_changes(query, context)
+        elif data == "clear_pending":
+            await self.main_handlers.handle_clear_pending(query, context)
         elif data == "select_season":
             await self.main_handlers.show_season_selection(query, context)
         elif data.startswith("season_"):

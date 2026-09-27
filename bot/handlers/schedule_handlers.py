@@ -27,6 +27,7 @@ class ScheduleHandlers:
         
         if pending_matches_count > 0 or pending_results_count > 0:
             keyboard.append([InlineKeyboardButton("✅ Применить изменения", callback_data="apply_changes")])
+            keyboard.append([InlineKeyboardButton("🗑️ Сбросить очередь", callback_data="clear_pending")])
         
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
         
@@ -93,6 +94,7 @@ class ScheduleHandlers:
         
         if pending_matches_count > 0 or pending_results_count > 0:
             keyboard.append([InlineKeyboardButton("✅ Применить изменения", callback_data="apply_changes")])
+            keyboard.append([InlineKeyboardButton("🗑️ Сбросить очередь", callback_data="clear_pending")])
         
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="show_schedule_menu")])
         
@@ -158,6 +160,7 @@ class ScheduleHandlers:
         
         keyboard = [
             [InlineKeyboardButton("✅ Применить изменения", callback_data="apply_changes")],
+            [InlineKeyboardButton("🗑️ Сбросить очередь", callback_data="clear_pending")],
             [InlineKeyboardButton("🔙 Назад", callback_data="show_schedule_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -193,6 +196,7 @@ class ScheduleHandlers:
         
         keyboard = [
             [InlineKeyboardButton("✅ Применить изменения", callback_data="apply_changes")],
+            [InlineKeyboardButton("🗑️ Сбросить очередь", callback_data="clear_pending")],
             [InlineKeyboardButton("🔙 Назад", callback_data="show_schedule_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)

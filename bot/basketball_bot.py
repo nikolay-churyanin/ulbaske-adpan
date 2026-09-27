@@ -152,7 +152,8 @@ class BasketballChampionshipBot:
                 "location": info.get("venue") or info.get("location"),
                 "datetime": f"{date} {time_str}",
                 "timestamp": convert_to_timestamp(date, time_str),
-                "gameType": info.get("gameType") or "regular"
+                "gameType": info.get("gameType") or "regular",
+                "stream": (info.get("stream") or "").strip()
             })
         return sorted(matches, key=lambda item: item["timestamp"])
 
@@ -190,6 +191,12 @@ class BasketballChampionshipBot:
             info["time"] = fields["time"]
         if "score" in fields and fields["score"] is not None:
             info["score"] = fields["score"]
+        if "stream" in fields:
+            url = (fields["stream"] or "").strip()
+            if url:
+                info["stream"] = url
+            else:
+                info.pop("stream", None)
         return True
 
     def delete_game(self, match):

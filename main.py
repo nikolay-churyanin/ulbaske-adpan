@@ -173,7 +173,7 @@ class BotApplication:
             if data.startswith("edit_select_venue_"):
                 new_venue = data.replace("edit_select_venue_", "")
                 await self.edit_handlers.handle_venue_edit(query, context, new_venue)
-            elif data in ["edit_venue", "edit_datetime", "edit_all"]:
+            elif data in ["edit_venue", "edit_datetime", "edit_all", "edit_stream"]:
                 await self.edit_handlers.handle_edit_selection(query, context, data)
             else:
                 # edit_{index} - выбор матча для редактирования
@@ -234,6 +234,8 @@ class BotApplication:
                 await self.result_handlers.handle_new_match_date_input(update, context)
             elif context.user_data.get('waiting_for_new_match_score'):
                 await self.result_handlers.handle_new_match_score_input(update, context)
+            elif context.user_data.get('waiting_for_stream'):
+                await self.edit_handlers.handle_stream_input(update, context)
             # Не добавляем сюда обработку waiting_for_stats_image - она обрабатывается в handle_photo_message
             else:
                 # Если бот не ожидает ввода, показываем главное меню

@@ -167,6 +167,7 @@ class MainHandlers:
         states_to_clear = [
             'waiting_for_date', 'waiting_for_score', 'waiting_for_venue_name',
             'waiting_for_edit_date', 'waiting_for_time', 'waiting_for_new_match',
+            'waiting_for_stream',
             'waiting_state_time', 'new_match_result', 'current_league', 'team1',
             'team2', 'venue', 'selected_date', 'current_edit_match', 
             'current_edit_index', 'matches_for_editing',

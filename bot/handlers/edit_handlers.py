@@ -2,6 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from datetime import datetime
 import logging
+from urllib.parse import urlparse
 from utils.helpers import parse_user_info
 
 logger = logging.getLogger(__name__)
@@ -62,13 +63,15 @@ class EditHandlers:
             f"🏀 {match['teamHome']} vs {match['teamAway']}\n"
             f"🏟️ Зал: {match['location']}\n"
             f"📅 Дата: {match['date']}\n"
-            f"⏰ Время: {match['time']}\n\n"
+            f"⏰ Время: {match['time']}\n"
+            f"📺 Стрим: {match.get('stream') or 'нет'}\n\n"
             "Выберите что хотите изменить:"
         )
         
         keyboard = [
             [InlineKeyboardButton("🏟️ Изменить зал", callback_data="edit_venue")],
             [InlineKeyboardButton("📅 Изменить дату и время", callback_data="edit_datetime")],
+            [InlineKeyboardButton("📺 Ссылка на стрим", callback_data="edit_stream")],
             [InlineKeyboardButton("✏️ Изменить всё", callback_data="edit_all")],
             [InlineKeyboardButton("🗑️ Удалить матч", callback_data=f"delete_{match_index}")],
             [InlineKeyboardButton("🔙 Назад к списку", callback_data="edit_schedule_menu")]
@@ -88,6 +91,8 @@ class EditHandlers:
             await self.show_venue_selection_for_edit(query, context)
         elif edit_type == "edit_datetime":
             await self.request_new_datetime_input(query, context)
+        elif edit_type == "edit_stream":
+            await self.request_stream_input(query, context)
         elif edit_type == "edit_all":
             await self.show_venue_selection_for_edit(query, context)
     
@@ -154,6 +159,73 @@ class EditHandlers:
         from bot.handlers.main_handlers import MainHandlers
         main_handlers = MainHandlers(self.bot)
         await main_handlers.show_main_menu_after_query(query, context)
+
+    async def request_stream_input(self, query, context):
+        match = context.user_data.get('current_edit_match')
+        current = match.get('stream') or 'нет'
+        await query.edit_message_text(
+            f"📺 Ссылка на стрим:\n\n"
+            f"🏀 {match['teamHome']} vs {match['teamAway']}\n"
+            f"📅 {match['date']} {match['time']}\n"
+            f"Сейчас: {current}\n\n"
+            "Отправьте ссылку (http/https).\n"
+            "Чтобы убрать стрим, отправьте минус: -"
+        )
+        context.user_data['waiting_for_stream'] = True
+
+    async def handle_stream_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.user_data.get('waiting_for_stream'):
+            return
+
+        match = context.user_data.get('current_edit_match')
+        if not match:
+            await update.message.reply_text("❌ Ошибка: матч не найден!")
+            return
+
+        raw = (update.message.text or "").strip()
+        if raw in ("-", "нет", "удалить", "убрать"):
+            stream_url = ""
+        else:
+            parsed = urlparse(raw)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                await update.message.reply_text(
+                    "❌ Нужна полная ссылка, например:\n"
+                    "https://vkvideo.ru/video-214017844_456239928\n"
+                    "Попробуйте снова или отправьте - чтобы убрать стрим."
+                )
+                return
+            stream_url = raw
+
+        user = update.message.from_user
+        username = parse_user_info(user)
+        success = self.bot.update_game_fields(match, stream=stream_url)
+        if success:
+            action = "удалена" if not stream_url else "сохранена"
+            commit_message = (
+                f"Ссылка на стрим {action}: {match['teamHome']} vs {match['teamAway']} | "
+                f"Изменил: {username}"
+            )
+            save_success = self.bot.save_games(commit_message)
+            if save_success:
+                shown = stream_url or "нет"
+                await update.message.reply_text(
+                    f"✅ Стрим обновлён.\n\n"
+                    f"🏀 {match['teamHome']} vs {match['teamAway']}\n"
+                    f"📺 {shown}"
+                )
+            else:
+                await update.message.reply_text("❌ Ошибка при сохранении ссылки!")
+        else:
+            await update.message.reply_text("❌ Матч не найден в games.json!")
+
+        context.user_data.pop('waiting_for_stream', None)
+        context.user_data.pop('current_edit_match', None)
+        context.user_data.pop('current_edit_index', None)
+        context.user_data.pop('matches_for_editing', None)
+
+        from bot.handlers.main_handlers import MainHandlers
+        main_handlers = MainHandlers(self.bot)
+        await main_handlers.show_main_menu(update, context)
     
     async def request_new_datetime_input(self, query, context):
         """Запрос ввода новой даты и времени"""

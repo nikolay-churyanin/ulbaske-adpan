@@ -1,9 +1,15 @@
 import os
 from dotenv import load_dotenv
 
+from utils.admin_store import parse_admin_ids
+
 load_dotenv()
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+ADMIN_IDS = parse_admin_ids(os.getenv("ADMIN_IDS", ""))
+ADMINS_FILE = os.getenv("ADMINS_FILE", os.path.join(BASE_DIR, "admins.json"))
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER")

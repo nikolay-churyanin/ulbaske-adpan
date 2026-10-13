@@ -1,6 +1,15 @@
 import logging
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application,
+    ApplicationHandlerStop,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    TypeHandler,
+    filters,
+)
 from config import *
 from github_manager import GitHubManager
 from bot.basketball_bot import BasketballChampionshipBot
@@ -12,6 +21,8 @@ from bot.handlers.venue_handlers import VenueHandlers
 from bot.handlers.league_handlers import LeagueHandlers
 from bot.handlers.edit_handlers import EditHandlers
 from bot.handlers.stats_handlers import StatsHandlers
+from bot.handlers.admin_handlers import AdminHandlers
+from utils.admin_store import AdminStore
 from utils.helpers import parse_user_info
 
 # Настройка логирования
@@ -36,8 +47,30 @@ class BotApplication:
         self.league_handlers = LeagueHandlers(self.bot)
         self.edit_handlers = EditHandlers(self.bot)
         self.stats_handlers = StatsHandlers(self.bot)
+        self.admin_store = AdminStore(ADMIN_IDS, ADMINS_FILE)
+        self.admin_handlers = AdminHandlers(self.bot, self.admin_store)
         
         self.application = None
+
+    async def guard_admins(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        chat = update.effective_chat
+        if chat and chat.type != "private":
+            raise ApplicationHandlerStop
+
+        user = update.effective_user
+        if user and self.admin_store.is_admin(user.id):
+            return
+
+        logger.warning(
+            "Отклонён доступ: id=%s username=%s",
+            getattr(user, "id", None),
+            getattr(user, "username", None),
+        )
+        if update.callback_query:
+            await update.callback_query.answer("Нет доступа", show_alert=True)
+        elif update.effective_message:
+            await update.effective_message.reply_text("Нет доступа.")
+        raise ApplicationHandlerStop
     
     async def handle_reset_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /reset для сброса состояний"""
@@ -52,12 +85,14 @@ class BotApplication:
     def setup_handlers(self):
         """Настройка всех обработчиков"""
         # Главное меню
+        self.application.add_handler(TypeHandler(Update, self.guard_admins), group=-1)
         self.application.add_handler(CommandHandler("start", self.main_handlers.start))
         self.application.add_handler(CommandHandler("reset", self.handle_reset_command))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         
         # Обработчики сообщений
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        self.application.add_handler(MessageHandler(filters.CONTACT, self.handle_message))
         # Обработчики статистики
         self.application.add_handler(MessageHandler(filters.PHOTO, self.handle_photo_message))
     
@@ -72,7 +107,17 @@ class BotApplication:
         if data == "refresh_data":
             await self.main_handlers.handle_refresh_data(query, context)
         elif data == "back_to_menu":
+            context.user_data.pop("waiting_for_admin_id", None)
             await self.main_handlers.show_main_menu(query, context, is_query=True)
+        elif data == "admins_menu":
+            await self.admin_handlers.show_menu(query, context)
+        elif data == "admin_add":
+            await self.admin_handlers.request_add(query, context)
+        elif data == "admin_remove_menu":
+            await self.admin_handlers.show_remove_menu(query, context)
+        elif data.startswith("admin_remove_"):
+            admin_id = int(data.replace("admin_remove_", ""))
+            await self.admin_handlers.remove_admin(query, context, admin_id)
         elif data == "select_league":
             await self.match_handlers.show_league_selection(query, context, "add_match")
         elif data == "add_result":
@@ -220,7 +265,9 @@ class BotApplication:
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Центральный обработчик текстовых сообщений"""
         try:
-            if context.user_data.get('waiting_for_date'):
+            if context.user_data.get('waiting_for_admin_id'):
+                await self.admin_handlers.handle_add_input(update, context)
+            elif context.user_data.get('waiting_for_date'):
                 await self.match_handlers.handle_date_input(update, context)
             elif context.user_data.get('waiting_for_score'):
                 await self.result_handlers.handle_score_input(update, context)
@@ -381,6 +428,13 @@ class BotApplication:
         # Настройка обработчиков
         self.setup_handlers()
         
+        if not self.admin_store.all_ids():
+            logger.error(
+                "Не заданы админы: пропишите ADMIN_IDS в .env, иначе бот никому не ответит."
+            )
+        else:
+            logger.info("Админов: %s", len(self.admin_store.all_ids()))
+
         # Запуск бота
         logger.info("Бот запущен...")
         self.application.run_polling()

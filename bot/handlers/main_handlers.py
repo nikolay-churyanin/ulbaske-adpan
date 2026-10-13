@@ -49,6 +49,7 @@ class MainHandlers:
             keyboard.insert(3, [InlineKeyboardButton("✅ Применить изменения", callback_data="apply_changes")])
             keyboard.insert(4, [InlineKeyboardButton("🗑️ Сбросить очередь", callback_data="clear_pending")])
         
+        keyboard.append([InlineKeyboardButton("👥 Админы", callback_data="admins_menu")])
         keyboard.append([InlineKeyboardButton("📆 Выбрать сезон", callback_data="select_season")])
         keyboard.append([InlineKeyboardButton("🔄 Обновить данные", callback_data="refresh_data")])
         
@@ -175,7 +176,8 @@ class MainHandlers:
             'waiting_for_stats_image', 'selected_game_for_stats',  # убрали stats_league
             'new_result_league', 'new_result_team1', 'new_result_team2',
             'new_result_venue', 'new_result_date', 'new_result_time',
-            'new_result_username', 'new_result_gameType'
+            'new_result_username', 'new_result_gameType',
+            'waiting_for_admin_id'
         ]
         
         for state in states_to_clear:
